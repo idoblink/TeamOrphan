@@ -124,7 +124,14 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
 
-    if (team.creatorId !== user.id && user.role !== "ADMIN") {
+    const isLeader =
+      team.creatorId === user.id ||
+      user.role === "ADMIN" ||
+      tinydb.collection("teamMembers").findFirst(
+        (m: any) => m.teamId === jr.teamId && m.userId === user.id && m.role === "LEADER"
+      );
+
+    if (!isLeader) {
       return NextResponse.json({ error: "Only the team leader can manage join requests" }, { status: 403 });
     }
 
@@ -143,12 +150,12 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: true, status: "REJECTED" });
     }
 
-    // ACCEPT
+    // ACCEPT: verify event hasn't started yet
     const event = tinydb.collection("events").findUnique((e: any) => e.id === team.eventId);
     if (event) {
-      const cutoffCheck = checkRecruitmentAllowed(new Date(event.startDate));
-      if (!cutoffCheck.allowed) {
-        return NextResponse.json({ error: cutoffCheck.reason }, { status: 400 });
+      const eventStart = new Date(event.startDate).getTime();
+      if (Date.now() >= eventStart) {
+        return NextResponse.json({ error: "Cannot accept applicants because the event has already started." }, { status: 400 });
       }
     }
 

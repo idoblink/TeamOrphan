@@ -27,8 +27,22 @@ export async function GET(req: NextRequest) {
         { read: true }
       );
 
-      const senderProfile = tinydb.collection("users").findUnique((u: any) => u.id === user.id);
-      const receiverProfile = tinydb.collection("users").findUnique((u: any) => u.id === otherUserId);
+      const senderProfile = tinydb.collection("users").findUnique((u: any) => u.id === user.id) || {
+        id: user.id,
+        name: (user as any).name || "You",
+        username: (user as any).username || "me",
+        avatar: (user as any).avatar || null,
+      };
+
+      let receiverProfile = tinydb.collection("users").findUnique((u: any) => u.id === otherUserId);
+      if (!receiverProfile) {
+        receiverProfile = {
+          id: otherUserId,
+          name: "Builder",
+          username: "builder",
+          avatar: null,
+        };
+      }
 
       const enrichedMessages = messages.map((m: any) => ({
         ...m,
@@ -36,7 +50,15 @@ export async function GET(req: NextRequest) {
         receiver: m.receiverId === user.id ? senderProfile : receiverProfile,
       }));
 
-      return NextResponse.json({ messages: enrichedMessages });
+      return NextResponse.json({
+        messages: enrichedMessages,
+        otherUser: {
+          id: receiverProfile.id,
+          name: receiverProfile.name,
+          username: receiverProfile.username,
+          avatar: receiverProfile.avatar,
+        },
+      });
     }
 
     // All conversations
@@ -49,9 +71,22 @@ export async function GET(req: NextRequest) {
     for (const msg of userMessages) {
       const contactId = msg.senderId === user.id ? msg.receiverId : msg.senderId;
       if (!contactsMap.has(contactId)) {
-        const contact = tinydb.collection("users").findUnique((u: any) => u.id === contactId);
+        let contact = tinydb.collection("users").findUnique((u: any) => u.id === contactId);
+        if (!contact) {
+          contact = {
+            id: contactId,
+            name: "Builder",
+            username: "builder",
+            avatar: null,
+          };
+        }
         contactsMap.set(contactId, {
-          contact,
+          contact: {
+            id: contact.id,
+            name: contact.name,
+            username: contact.username,
+            avatar: contact.avatar,
+          },
           lastMessage: msg,
           unread: msg.receiverId === user.id && !msg.read,
         });
@@ -99,7 +134,7 @@ export async function POST(req: NextRequest) {
     tinydb.collection("notifications").insert({
       userId: receiverId,
       type: "MESSAGE",
-      title: `New message from ${user.name}`,
+      title: `New message from ${(user as any).name || "a builder"}`,
       message: content.length > 60 ? `${content.slice(0, 60)}...` : content,
       link: `/messages?chatWith=${user.id}`,
       read: false,
@@ -109,7 +144,12 @@ export async function POST(req: NextRequest) {
       success: true,
       message: {
         ...message,
-        sender: { id: user.id, name: (user as any).name, username: (user as any).username, avatar: (user as any).avatar },
+        sender: {
+          id: user.id,
+          name: (user as any).name,
+          username: (user as any).username,
+          avatar: (user as any).avatar,
+        },
       },
     });
   } catch (error: any) {

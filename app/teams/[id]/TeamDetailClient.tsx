@@ -48,7 +48,13 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
   const [actionError, setActionError] = useState<string | null>(null);
 
   const status = getRecruitmentStatus(team.event.startDate);
-  const isLeader = currentUser && team.creatorId === currentUser.id;
+  const isLeader = Boolean(
+    currentUser && (
+      team.creatorId === currentUser.id ||
+      currentUser.role === "ADMIN" ||
+      team.members?.some((m: any) => m.userId === currentUser.id && m.role === "LEADER")
+    )
+  );
   const isMember = currentUser && team.members.some((m: any) => m.userId === currentUser.id);
   const currentMembersCount = team.members.length;
   const missingCount = Math.max(0, team.maxMembers - currentMembersCount);
@@ -248,7 +254,15 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Confirmed Members */}
           {team.members.map((member: any) => {
-            const isMe = currentUser && member.user.id === currentUser.id;
+            const memberUser = member.user || {
+              id: member.userId,
+              name: "Team Member",
+              username: "member",
+              avatar: null,
+              college: null,
+              location: null,
+            };
+            const isMe = currentUser && memberUser.id === currentUser.id;
             return (
               <BrutalCard
                 key={member.id}
@@ -257,10 +271,10 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
                 className="flex flex-col justify-between space-y-3"
               >
                 <div className="flex items-center gap-3">
-                  <Avatar name={member.user.name} src={member.user.avatar} size="md" />
+                  <Avatar name={memberUser.name} src={memberUser.avatar} size="md" />
                   <div>
                     <h4 className="font-heading text-sm font-black uppercase text-black">
-                      {member.user.name}
+                      {memberUser.name}
                     </h4>
                     <span
                       className={`inline-block border border-black px-1.5 py-0.2 text-[10px] font-black uppercase ${
@@ -273,12 +287,12 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
                 </div>
 
                 <div className="text-[11px] font-semibold text-neutral-600 line-clamp-1">
-                  {member.user.college || member.user.location || "Teammate"}
+                  {memberUser.college || memberUser.location || "Teammate"}
                 </div>
 
                 <div className="flex items-center gap-2 pt-2 border-t border-black/20">
                   <Link
-                    href={`/profile/${member.user.username}`}
+                    href={`/profile/${memberUser.username}`}
                     className="flex-1 text-center border-2 border-black bg-white py-1 text-[11px] font-black uppercase hover:bg-brutal-yellow transition-colors"
                   >
                     Profile
@@ -288,14 +302,14 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
                       type="button"
                       onClick={() =>
                         setMessageTargetUser({
-                          id: member.user.id,
-                          name: member.user.name,
+                          id: memberUser.id,
+                          name: memberUser.name,
                         })
                       }
-                      className="border-2 border-black bg-brutal-cyan p-1 hover:bg-cyan-300 transition-colors"
-                      title="Send Direct Message"
+                      className="border-2 border-black bg-brutal-yellow p-1 hover:bg-black hover:text-white transition-colors"
+                      title="Direct Message"
                     >
-                      <MessageSquare className="w-4 h-4 text-black" />
+                      <MessageSquare className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
@@ -354,7 +368,16 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
           ) : (
             <div className="space-y-4">
               {team.joinRequests.map((req: any) => {
-                const candidateSkills = parseJsonArray(req.user.skills);
+                const reqUser = req.user || {
+                  id: req.userId,
+                  name: "Applicant",
+                  username: "applicant",
+                  avatar: null,
+                  college: null,
+                  location: null,
+                  skills: "[]",
+                };
+                const candidateSkills = parseJsonArray(reqUser.skills);
                 return (
                   <BrutalCard
                     key={req.id}
@@ -364,18 +387,18 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
                   >
                     <div className="space-y-2 flex-1">
                       <div className="flex items-center gap-3">
-                        <Avatar name={req.user.name} src={req.user.avatar} size="md" />
+                        <Avatar name={reqUser.name} src={reqUser.avatar} size="md" />
                         <div>
                           <div className="flex items-center gap-2">
                             <h4 className="font-heading text-base font-black uppercase text-black">
-                              {req.user.name}
+                              {reqUser.name}
                             </h4>
                             <span className="text-xs font-bold text-neutral-500">
-                              @{req.user.username}
+                              @{reqUser.username}
                             </span>
                           </div>
                           <div className="text-xs font-bold text-neutral-600">
-                            {req.user.college || req.user.location || "Student"}
+                            {reqUser.college || reqUser.location || "Student"}
                           </div>
                         </div>
                       </div>
@@ -428,7 +451,21 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
                         </span>
                       )}
 
-                      <Link href={`/profile/${req.user.username}`}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setMessageTargetUser({
+                            id: reqUser.id,
+                            name: reqUser.name,
+                          })
+                        }
+                        className="border-2 border-black bg-brutal-yellow p-2 hover:bg-black hover:text-white transition-colors"
+                        title="Direct Message Applicant"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </button>
+
+                      <Link href={`/profile/${reqUser.username}`}>
                         <BrutalButton variant="outline" size="sm">
                           Profile
                         </BrutalButton>

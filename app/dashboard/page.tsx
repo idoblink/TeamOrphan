@@ -8,6 +8,7 @@ import { TeamCard } from "@/components/cards/TeamCard";
 import { OrphanCard } from "@/components/cards/OrphanCard";
 import { Avatar } from "@/components/ui/Avatar";
 import { SkillTag } from "@/components/ui/SkillTag";
+import { IncomingRequestsManager, IncomingRequestItem } from "@/components/dashboard/IncomingRequestsManager";
 import { calculateCompatibility } from "@/lib/matching";
 import { parseJsonArray } from "@/lib/utils";
 import {
@@ -44,6 +45,30 @@ export default async function DashboardPage() {
         .findMany((jr: any) => jr.teamId === td.id && jr.status === "PENDING");
       return { ...td, event, members, joinRequests, _count: { members: members.length, joinRequests: joinRequests.length } };
     });
+
+  // Collect pending applications for squads this user leads
+  const incomingRequests: IncomingRequestItem[] = [];
+  myTeams.forEach((t: any) => {
+    t.joinRequests?.forEach((jr: any) => {
+      const applicant = tinydb.collection("users").findUnique((usr: any) => usr.id === jr.userId);
+      incomingRequests.push({
+        id: jr.id,
+        teamId: t.id,
+        teamName: t.name,
+        message: jr.message,
+        createdAt: jr.createdAt,
+        user: {
+          id: jr.userId,
+          name: applicant?.name || "Applicant",
+          username: applicant?.username || "applicant",
+          avatar: applicant?.avatar || null,
+          college: applicant?.college || null,
+          location: applicant?.location || null,
+          skills: applicant?.skills || JSON.stringify([]),
+        },
+      });
+    });
+  });
 
   // 2. Member teams
   const memberTeams = tinydb.collection("teamMembers")
@@ -214,6 +239,11 @@ export default async function DashboardPage() {
           </button>
         </Link>
       </div>
+
+      {/* 2b. INCOMING SQUAD APPLICATIONS */}
+      {incomingRequests.length > 0 && (
+        <IncomingRequestsManager initialRequests={incomingRequests} />
+      )}
 
       {/* 3. YOUR CREATED TEAMS */}
       <div className="space-y-6">

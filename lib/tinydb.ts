@@ -125,13 +125,6 @@ const defaultData: Schema = {
       role: "LEADER",
       joinedAt: new Date().toISOString(),
     },
-    {
-      id: "tm_2",
-      teamId: "team_neural",
-      userId: "usr_marcus",
-      role: "MEMBER",
-      joinedAt: new Date().toISOString(),
-    },
   ],
   orphanListings: [
     {
@@ -150,20 +143,57 @@ const defaultData: Schema = {
       updatedAt: new Date().toISOString(),
     },
   ],
-  joinRequests: [],
+  joinRequests: [
+    {
+      id: "jr_sample_1",
+      teamId: "team_neural",
+      userId: "usr_marcus",
+      message: "Hey Alex! I have experience with FastAPI and PyTorch from 2 hackathons. Would love to take the ML spot on Neural Ninjas!",
+      status: "PENDING",
+      createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+      updatedAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+    },
+  ],
   notifications: [
     {
       id: "notif_1",
+      userId: "usr_alex",
+      type: "JOIN_REQUEST",
+      title: "New Join Request: Neural Ninjas Squad",
+      message: "Marcus Chen sent a request to join Neural Ninjas Squad for CodeVerse.",
+      link: "/teams/team_neural",
+      read: false,
+      createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+    },
+    {
+      id: "notif_2",
       userId: "usr_alex",
       type: "SYSTEM",
       title: "Welcome to TeamSync!",
       message: "Your account is active. Manage your squad listings or recruit free agents.",
       link: "/dashboard",
-      read: false,
-      createdAt: new Date().toISOString(),
+      read: true,
+      createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
     },
   ],
-  messages: [],
+  messages: [
+    {
+      id: "msg_1",
+      senderId: "usr_marcus",
+      receiverId: "usr_alex",
+      content: "Hey Alex, saw your team Neural Ninjas for CodeVerse. Are you still looking for someone to build the Python / ML pipeline?",
+      read: true,
+      createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+    },
+    {
+      id: "msg_2",
+      senderId: "usr_alex",
+      receiverId: "usr_marcus",
+      content: "Hey Marcus! Yes definitely. We have Next.js and FastAPI ready, need the inference model hooked up. Send a join request!",
+      read: true,
+      createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+    },
+  ],
   reports: [],
 };
 
