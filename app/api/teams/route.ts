@@ -3,9 +3,11 @@ import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { CreateTeamSchema } from "@/lib/validation";
 import { checkRecruitmentAllowed } from "@/lib/cutoff";
+import { saveTeamToCookie, saveMemberToCookie, syncDatabaseFromCookies } from "@/lib/cookie-sync";
 
 export async function GET(req: NextRequest) {
   try {
+    syncDatabaseFromCookies();
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
     const mode = searchParams.get("mode");
@@ -122,11 +124,14 @@ export async function POST(req: NextRequest) {
       status: "OPEN",
     });
 
-    tinydb.collection("teamMembers").insert({
+    const member = tinydb.collection("teamMembers").insert({
       teamId: team.id,
       userId: user.id,
       role: "LEADER",
     });
+
+    saveTeamToCookie(team);
+    saveMemberToCookie(member);
 
     return NextResponse.json({ success: true, team: { ...team, event } });
   } catch (error: any) {

@@ -71,9 +71,9 @@ const defaultData: Schema = {
   reports: [],
 };
 
-class TinyDatabase {
-  private cache: Schema | null = null;
+const globalRef = globalThis as unknown as { __teamsync_db_cache?: Schema };
 
+class TinyDatabase {
   private ensureDir() {
     try {
       if (!fs.existsSync(DATA_DIR)) {
@@ -85,25 +85,30 @@ class TinyDatabase {
   }
 
   private read(): Schema {
-    if (this.cache) return this.cache;
     this.ensureDir();
     try {
       if (fs.existsSync(DB_FILE)) {
         const content = fs.readFileSync(DB_FILE, "utf8");
-        this.cache = JSON.parse(content);
-        return this.cache!;
+        const parsed = JSON.parse(content);
+        globalRef.__teamsync_db_cache = parsed;
+        return parsed;
       }
     } catch {
-      // Fallback to default
+      // Fallback
     }
+
+    if (globalRef.__teamsync_db_cache) {
+      return globalRef.__teamsync_db_cache;
+    }
+
     // Deep clone default data so mutations don't corrupt the template
-    this.cache = JSON.parse(JSON.stringify(defaultData));
-    this.write(this.cache!);
-    return this.cache!;
+    const fresh = JSON.parse(JSON.stringify(defaultData));
+    this.write(fresh);
+    return fresh;
   }
 
   private write(data: Schema) {
-    this.cache = data;
+    globalRef.__teamsync_db_cache = data;
     try {
       this.ensureDir();
       fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");

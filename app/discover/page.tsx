@@ -6,9 +6,12 @@ import { OrphanCard } from "@/components/cards/OrphanCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { calculateCompatibility } from "@/lib/matching";
+import { syncDatabaseFromCookies } from "@/lib/cookie-sync";
 import { Search, Filter, Flame, Users, Sparkles, Inbox } from "lucide-react";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 interface DiscoverPageProps {
   searchParams: {
@@ -22,6 +25,7 @@ interface DiscoverPageProps {
 }
 
 export default async function DiscoverPage({ searchParams }: DiscoverPageProps) {
+  syncDatabaseFromCookies();
   const user = await getCurrentUser();
   const activeTab = searchParams.tab === "orphans" ? "orphans" : "teams";
   const search = searchParams.search || "";

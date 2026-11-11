@@ -2,15 +2,19 @@ import { notFound } from "next/navigation";
 import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateCompatibility } from "@/lib/matching";
+import { syncDatabaseFromCookies } from "@/lib/cookie-sync";
 import { TeamDetailClient } from "./TeamDetailClient";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 export default async function TeamPage({
   params,
 }: {
   params: { id: string };
 }) {
+  syncDatabaseFromCookies();
   const currentUser = await getCurrentUser();
 
   const teamData = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);

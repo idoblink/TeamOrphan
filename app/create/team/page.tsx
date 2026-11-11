@@ -100,8 +100,7 @@ function CreateTeamForm() {
         throw new Error(data.error || "Failed to create team listing.");
       }
 
-      router.push(`/teams/${data.team.id}`);
-      router.refresh();
+      window.location.href = `/teams/${data.team.id}`;
     } catch (err: any) {
       setError(err.message);
     } finally {

@@ -11,6 +11,7 @@ import { SkillTag } from "@/components/ui/SkillTag";
 import { IncomingRequestsManager, IncomingRequestItem } from "@/components/dashboard/IncomingRequestsManager";
 import { calculateCompatibility } from "@/lib/matching";
 import { parseJsonArray } from "@/lib/utils";
+import { syncDatabaseFromCookies } from "@/lib/cookie-sync";
 import {
   Users,
   Compass,
@@ -20,8 +21,11 @@ import {
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 export default async function DashboardPage() {
+  syncDatabaseFromCookies();
   const user = await getCurrentUser();
   if (!user) {
     redirect("/login");

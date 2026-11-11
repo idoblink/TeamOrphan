@@ -81,8 +81,7 @@ function CreateOrphanForm() {
         throw new Error(data.error || "Failed to post orphan listing.");
       }
 
-      router.push("/discover?tab=orphans");
-      router.refresh();
+      window.location.href = "/discover?tab=orphans";
     } catch (err: any) {
       setError(err.message);
     } finally {

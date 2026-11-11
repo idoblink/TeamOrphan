@@ -5,9 +5,12 @@ import { TeamCard } from "@/components/cards/TeamCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { calculateCompatibility } from "@/lib/matching";
+import { syncDatabaseFromCookies } from "@/lib/cookie-sync";
 import { Users, PlusCircle, Search, Flame } from "lucide-react";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 interface TeamsPageProps {
   searchParams: {
@@ -19,6 +22,7 @@ interface TeamsPageProps {
 }
 
 export default async function TeamsPage({ searchParams }: TeamsPageProps) {
+  syncDatabaseFromCookies();
   const user = await getCurrentUser();
   const category = searchParams.category || "ALL";
   const mode = searchParams.mode || "ALL";

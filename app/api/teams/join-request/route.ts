@@ -3,9 +3,11 @@ import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { JoinRequestSchema } from "@/lib/validation";
 import { checkRecruitmentAllowed } from "@/lib/cutoff";
+import { saveJoinRequestToCookie, saveMemberToCookie, syncDatabaseFromCookies } from "@/lib/cookie-sync";
 
 export async function POST(req: NextRequest) {
   try {
+    syncDatabaseFromCookies();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Please log in to join a team" }, { status: 401 });
@@ -94,6 +96,8 @@ export async function POST(req: NextRequest) {
       read: false,
     });
 
+    saveJoinRequestToCookie(jr);
+
     return NextResponse.json({
       success: true,
       joinRequest: {
@@ -117,6 +121,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    syncDatabaseFromCookies();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -151,6 +156,7 @@ export async function PATCH(req: NextRequest) {
 
     if (action === "REJECT") {
       tinydb.collection("joinRequests").update(requestId, { status: "REJECTED" });
+      saveJoinRequestToCookie({ ...jr, status: "REJECTED" });
 
       tinydb.collection("notifications").insert({
         userId: jr.userId,
@@ -178,13 +184,18 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "This team is already at maximum capacity." }, { status: 400 });
     }
 
-    tinydb.collection("teamMembers").insert({
+    const newMember = {
+      id: `tm_${Date.now()}`,
       teamId: jr.teamId,
       userId: jr.userId,
       role: "MEMBER",
-    });
+    };
 
+    tinydb.collection("teamMembers").insert(newMember);
     tinydb.collection("joinRequests").update(requestId, { status: "ACCEPTED" });
+
+    saveJoinRequestToCookie({ ...jr, status: "ACCEPTED" });
+    saveMemberToCookie(newMember);
 
     if (members.length + 1 >= team.maxMembers) {
       tinydb.collection("teams").update(jr.teamId, { status: "FULL" });

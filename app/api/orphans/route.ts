@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { CreateOrphanListingSchema } from "@/lib/validation";
+import { saveOrphanToCookie, syncDatabaseFromCookies } from "@/lib/cookie-sync";
 
 export async function GET(req: NextRequest) {
   try {
+    syncDatabaseFromCookies();
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
     const mode = searchParams.get("mode");
@@ -82,6 +84,7 @@ export async function POST(req: NextRequest) {
 
     if (existing) {
       const updated = tinydb.collection("orphanListings").update(existing.id, payload);
+      saveOrphanToCookie(updated);
       return NextResponse.json({ success: true, orphan: updated });
     }
 
@@ -91,6 +94,8 @@ export async function POST(req: NextRequest) {
       ...payload,
       status: "ACTIVE",
     });
+
+    saveOrphanToCookie(orphan);
 
     return NextResponse.json({ success: true, orphan });
   } catch (error: any) {
