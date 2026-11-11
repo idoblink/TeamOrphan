@@ -68,12 +68,20 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
             </p>
           </div>
 
-          <Link href="/create/team">
-            <BrutalButton variant="black" size="md">
-              <PlusCircle className="w-4 h-4" />
-              + Create Team for Event
-            </BrutalButton>
-          </Link>
+          <div className="flex flex-wrap gap-2.5">
+            <Link href="/create/event">
+              <BrutalButton variant="purple" size="md" className="text-white">
+                <PlusCircle className="w-4 h-4" />
+                + Host / Create Event
+              </BrutalButton>
+            </Link>
+            <Link href="/create/team">
+              <BrutalButton variant="black" size="md">
+                <PlusCircle className="w-4 h-4" />
+                + Create Team for Event
+              </BrutalButton>
+            </Link>
+          </div>
         </div>
       </div>
 

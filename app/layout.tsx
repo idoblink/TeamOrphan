@@ -87,6 +87,11 @@ export default async function RootLayout({
                     </Link>
                   </li>
                   <li>
+                    <Link href="/create/event" className="hover:text-brutal-yellow transition-colors">
+                      Host / Add Event
+                    </Link>
+                  </li>
+                  <li>
                     <Link href="/create/team" className="hover:text-brutal-yellow transition-colors">
                       Post Team Requirement
                     </Link>

@@ -127,11 +127,17 @@ export const BrutalNavbar: React.FC<{ initialUser?: NavbarUser | null }> = ({
         <div className="hidden md:flex items-center gap-3">
           {user ? (
             <>
-              {/* Quick Create Button */}
+              {/* Quick Create Buttons */}
               <Link href="/create/team">
                 <BrutalButton variant="yellow" size="sm" className="hidden lg:inline-flex">
                   <PlusCircle className="w-4 h-4" />
                   + Post Need
+                </BrutalButton>
+              </Link>
+              <Link href="/create/event">
+                <BrutalButton variant="purple" size="sm" className="hidden xl:inline-flex text-white">
+                  <Calendar className="w-4 h-4" />
+                  + Host Event
                 </BrutalButton>
               </Link>
 
@@ -318,20 +324,27 @@ export const BrutalNavbar: React.FC<{ initialUser?: NavbarUser | null }> = ({
                 </Link>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-1.5">
                 <Link
                   href="/create/team"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="border-2 border-black bg-brutal-yellow p-2 text-center text-xs font-black uppercase shadow-brutal-sm"
+                  className="border-2 border-black bg-brutal-yellow p-2 text-center text-[10px] sm:text-xs font-black uppercase shadow-brutal-sm"
                 >
-                  + Create Team
+                  + Team
                 </Link>
                 <Link
                   href="/create/orphan"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="border-2 border-black bg-brutal-green p-2 text-center text-xs font-black uppercase shadow-brutal-sm"
+                  className="border-2 border-black bg-brutal-green p-2 text-center text-[10px] sm:text-xs font-black uppercase shadow-brutal-sm"
                 >
-                  + Orphan Profile
+                  + Orphan
+                </Link>
+                <Link
+                  href="/create/event"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="border-2 border-black bg-brutal-purple p-2 text-center text-[10px] sm:text-xs font-black uppercase text-white shadow-brutal-sm"
+                >
+                  + Event
                 </Link>
               </div>
 

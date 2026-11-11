@@ -17,9 +17,13 @@ export default async function EventDetailPage({
 }: {
   params: { id: string };
 }) {
-  await tinydb.sync();
+  await tinydb.sync(true);
   const user = await getCurrentUser();
-  const event = tinydb.collection("events").findUnique((e: any) => e.id === params.id);
+  let event = tinydb.collection("events").findUnique((e: any) => e.id === params.id);
+  if (!event) {
+    await tinydb.sync(true);
+    event = tinydb.collection("events").findUnique((e: any) => e.id === params.id);
+  }
   if (!event) notFound();
 
   const teams = tinydb.collection("teams")

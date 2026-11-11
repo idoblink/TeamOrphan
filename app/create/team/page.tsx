@@ -141,18 +141,26 @@ function CreateTeamForm() {
             required
           />
 
-          <BrutalSelect
-            label="Select Target Event *"
-            value={formData.eventId}
-            onChange={(e) => setFormData({ ...formData, eventId: e.target.value })}
-            required
-          >
-            {events.map((ev) => (
-              <option key={ev.id} value={ev.id}>
-                {ev.name} ({ev.category} • {new Date(ev.startDate).toLocaleDateString()})
-              </option>
-            ))}
-          </BrutalSelect>
+          <div>
+            <BrutalSelect
+              label="Select Target Event *"
+              value={formData.eventId}
+              onChange={(e) => setFormData({ ...formData, eventId: e.target.value })}
+              required
+            >
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.name} ({ev.category} • {new Date(ev.startDate).toLocaleDateString()})
+                </option>
+              ))}
+            </BrutalSelect>
+            <div className="mt-1 flex items-center justify-between text-[11px] font-bold">
+              <span className="text-neutral-500">Don&apos;t see your hackathon or tournament listed?</span>
+              <Link href="/create/event" className="text-black underline font-black hover:text-brutal-pink">
+                + Host / Add Event
+              </Link>
+            </div>
+          </div>
 
           {selectedEvent && (
             <div className="border-2 border-black bg-yellow-50 p-3 text-xs font-bold space-y-1 shadow-[2px_2px_0px_#000]">
