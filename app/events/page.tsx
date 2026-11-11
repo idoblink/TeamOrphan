@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { EventCard } from "@/components/cards/EventCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
@@ -20,42 +20,24 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const mode = searchParams.mode || "ALL";
   const search = searchParams.search || "";
 
-  let events: any[] = [];
+  let rawEvents = tinydb.collection("events").findMany();
 
-  try {
-    const snap = await adminDb.collection("events").orderBy("startDate", "asc").get();
-    let rawEvents = snap.docs.map((d) => {
-      const data = d.data() as any;
-      const startDate = data.startDate?.toDate ? data.startDate.toDate().toISOString() : new Date(data.startDate).toISOString();
-      return { id: d.id, ...data, startDate } as any;
-    });
-
-    if (category !== "ALL") rawEvents = rawEvents.filter((e: any) => e.category === category);
-    if (mode !== "ALL") rawEvents = rawEvents.filter((e: any) => e.mode === mode);
-    if (search) {
-      const s = search.toLowerCase();
-      rawEvents = rawEvents.filter(
-        (e: any) =>
-          e.name?.toLowerCase().includes(s) ||
-          e.description?.toLowerCase().includes(s) ||
-          e.location?.toLowerCase().includes(s)
-      );
-    }
-
-    // Enrich with team counts
-    events = await Promise.all(
-      rawEvents.map(async (event) => {
-        try {
-          const teamsSnap = await adminDb.collection("teams").where("eventId", "==", event.id).get();
-          return { ...event, _count: { teams: teamsSnap.size } };
-        } catch {
-          return { ...event, _count: { teams: 0 } };
-        }
-      })
+  if (category !== "ALL") rawEvents = rawEvents.filter((e: any) => e.category === category);
+  if (mode !== "ALL") rawEvents = rawEvents.filter((e: any) => e.mode === mode);
+  if (search) {
+    const s = search.toLowerCase();
+    rawEvents = rawEvents.filter(
+      (e: any) =>
+        e.name?.toLowerCase().includes(s) ||
+        e.description?.toLowerCase().includes(s) ||
+        e.location?.toLowerCase().includes(s)
     );
-  } catch (err) {
-    console.error("Events fetch error:", err);
   }
+
+  const events = rawEvents.map((event: any) => {
+    const teamsCount = tinydb.collection("teams").count((t: any) => t.eventId === event.id);
+    return { ...event, _count: { teams: teamsCount } };
+  });
 
   const categories = [
     "ALL",
@@ -152,8 +134,8 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
         </BrutalCard>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {events.map((event) => (
-            <EventCard key={event.id} event={event as any} />
+          {events.map((event: any) => (
+            <EventCard key={event.id} event={event} />
           ))}
         </div>
       )}

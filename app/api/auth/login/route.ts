@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { comparePassword, setSessionCookie } from "@/lib/auth";
 import { LoginSchema } from "@/lib/validation";
 
@@ -15,27 +15,13 @@ export async function POST(req: NextRequest) {
     const { login, password } = validated.data;
     const loginLower = login.toLowerCase();
 
-    // Try email first, then username
-    let userSnap = await adminDb
-      .collection("users")
-      .where("email", "==", loginLower)
-      .limit(1)
-      .get();
+    const user = tinydb.collection("users").findFirst((u: any) =>
+      u.email?.toLowerCase() === loginLower || u.username?.toLowerCase() === loginLower
+    );
 
-    if (userSnap.empty) {
-      userSnap = await adminDb
-        .collection("users")
-        .where("username", "==", loginLower)
-        .limit(1)
-        .get();
-    }
-
-    if (userSnap.empty) {
+    if (!user) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
-
-    const userDoc = userSnap.docs[0];
-    const user = { id: userDoc.id, ...userDoc.data() } as any;
 
     if (user.isSuspended) {
       return NextResponse.json(

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { TeamCard } from "@/components/cards/TeamCard";
 import { OrphanCard } from "@/components/cards/OrphanCard";
@@ -31,29 +31,30 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
   const skill = searchParams.skill || "";
 
   // 1. Fetch and filter Teams
-  const teamsSnap = await adminDb.collection("teams").orderBy("createdAt", "desc").get();
-  let rawTeams = teamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  let rawTeams = tinydb.collection("teams").findMany().map((team: any) => {
+    const event = tinydb.collection("events").findUnique((e: any) => e.id === team.eventId);
+    const creator = tinydb.collection("users").findUnique((u: any) => u.id === team.creatorId);
+    const members = tinydb.collection("teamMembers")
+      .findMany((m: any) => m.teamId === team.id)
+      .map((m: any) => {
+        const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+        return { id: m.id, ...m, user: u ? { name: u.name, avatar: u.avatar } : null };
+      });
+    return {
+      ...team,
+      event,
+      creator: creator ? { id: creator.id, name: creator.name, username: creator.username, avatar: creator.avatar } : null,
+      members,
+      _count: { members: members.length },
+    };
+  }).filter((t: any) => t.event !== null);
 
-  // Enrich with event + creator + members
-  rawTeams = await Promise.all(
-    rawTeams.map(async (team) => {
-      const eDoc = await adminDb.collection("events").doc(team.eventId).get();
-      const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
-      const cDoc = await adminDb.collection("users").doc(team.creatorId).get();
-      const creator = cDoc.exists ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar } : null;
-      const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", team.id).get();
-      const members = membersSnap.docs.map((m) => ({ id: m.id, ...m.data() }));
-      return { ...team, event, creator, members, _count: { members: membersSnap.size } };
-    })
-  );
-  rawTeams = rawTeams.filter((t) => t.event !== null);
-
-  if (category !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.category === category);
-  if (mode !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.mode === mode);
-  if (skill) rawTeams = rawTeams.filter((t) => t.requiredSkills?.toLowerCase().includes(skill.toLowerCase()));
+  if (category !== "ALL") rawTeams = rawTeams.filter((t: any) => t.event?.category === category);
+  if (mode !== "ALL") rawTeams = rawTeams.filter((t: any) => t.event?.mode === mode);
+  if (skill) rawTeams = rawTeams.filter((t: any) => t.requiredSkills?.toLowerCase().includes(skill.toLowerCase()));
   if (search) {
     const s = search.toLowerCase();
-    rawTeams = rawTeams.filter((t) =>
+    rawTeams = rawTeams.filter((t: any) =>
       t.name?.toLowerCase().includes(s) ||
       t.description?.toLowerCase().includes(s) ||
       t.requiredSkills?.toLowerCase().includes(s) ||
@@ -64,15 +65,15 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
   let teams = rawTeams;
   if (urgency === "urgent") {
     const now = Date.now();
-    teams = rawTeams.filter((t) => {
-      const start = t.event.startDate?.toMillis ? t.event.startDate.toMillis() : new Date(t.event.startDate).getTime();
+    teams = rawTeams.filter((t: any) => {
+      const start = new Date(t.event.startDate).getTime();
       const cutoff = start - 24 * 60 * 60 * 1000;
       const remaining = cutoff - now;
       return remaining > 0 && remaining <= 24 * 60 * 60 * 1000;
     });
   }
 
-  const teamsWithMatches = teams.map((team) => {
+  const teamsWithMatches = teams.map((team: any) => {
     let match = null;
     if (user) {
       match = calculateCompatibility(
@@ -84,28 +85,33 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
   });
 
   // 2. Fetch and filter Orphan Listings
-  const orphansSnap = await adminDb.collection("orphanListings").where("status", "==", "ACTIVE").orderBy("createdAt", "desc").get();
-  let rawOrphans = orphansSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  let rawOrphans = tinydb.collection("orphanListings")
+    .findMany((o: any) => o.status === "ACTIVE")
+    .map((o: any) => {
+      const orphanUser = tinydb.collection("users").findUnique((u: any) => u.id === o.userId);
+      const targetEvent = o.targetEventId ? tinydb.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
+      return {
+        ...o,
+        user: orphanUser ? {
+          id: orphanUser.id,
+          name: orphanUser.name,
+          username: orphanUser.username,
+          avatar: orphanUser.avatar,
+          college: orphanUser.college,
+          location: orphanUser.location,
+          skills: orphanUser.skills,
+          interests: orphanUser.interests,
+        } : null,
+        targetEvent,
+      };
+    });
 
-  rawOrphans = await Promise.all(
-    rawOrphans.map(async (o) => {
-      const uDoc = await adminDb.collection("users").doc(o.userId).get();
-      const orphanUser = uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, username: uDoc.data()!.username, avatar: uDoc.data()!.avatar, college: uDoc.data()!.college, location: uDoc.data()!.location, skills: uDoc.data()!.skills, interests: uDoc.data()!.interests } : null;
-      let targetEvent = null;
-      if (o.targetEventId) {
-        const eDoc = await adminDb.collection("events").doc(o.targetEventId).get();
-        if (eDoc.exists) targetEvent = { id: eDoc.id, ...eDoc.data() };
-      }
-      return { ...o, user: orphanUser, targetEvent };
-    })
-  );
-
-  if (mode !== "ALL") rawOrphans = rawOrphans.filter((o) => o.mode === mode);
-  if (skill) rawOrphans = rawOrphans.filter((o) => o.skills?.toLowerCase().includes(skill.toLowerCase()));
-  if (category !== "ALL") rawOrphans = rawOrphans.filter((o) => o.targetCategory === category || o.targetEvent?.category === category);
+  if (mode !== "ALL") rawOrphans = rawOrphans.filter((o: any) => o.mode === mode);
+  if (skill) rawOrphans = rawOrphans.filter((o: any) => o.skills?.toLowerCase().includes(skill.toLowerCase()));
+  if (category !== "ALL") rawOrphans = rawOrphans.filter((o: any) => o.targetCategory === category || o.targetEvent?.category === category);
   if (search) {
     const s = search.toLowerCase();
-    rawOrphans = rawOrphans.filter((o) =>
+    rawOrphans = rawOrphans.filter((o: any) =>
       o.bio?.toLowerCase().includes(s) ||
       o.skills?.toLowerCase().includes(s) ||
       o.user?.name?.toLowerCase().includes(s) ||
@@ -114,7 +120,7 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
     );
   }
 
-  const orphansWithMatches = rawOrphans.map((orphan) => {
+  const orphansWithMatches = rawOrphans.map((orphan: any) => {
     let match = null;
     if (user) {
       match = calculateCompatibility(

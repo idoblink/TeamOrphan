@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateCompatibility } from "@/lib/matching";
 import { TeamDetailClient } from "./TeamDetailClient";
@@ -13,95 +13,25 @@ export default async function TeamPage({
 }) {
   const currentUser = await getCurrentUser();
 
-  const teamDoc = await adminDb.collection("teams").doc(params.id).get();
+  const teamData = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+  if (!teamData) notFound();
 
-  if (!teamDoc.exists) {
-    notFound();
-  }
+  const event = tinydb.collection("events").findUnique((e: any) => e.id === teamData.eventId);
+  const creator = tinydb.collection("users").findUnique((u: any) => u.id === teamData.creatorId);
 
-  const teamData = { id: teamDoc.id, ...teamDoc.data() } as any;
+  const members = tinydb.collection("teamMembers")
+    .findMany((m: any) => m.teamId === params.id)
+    .map((m: any) => {
+      const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+      return { id: m.id, ...m, user: u };
+    });
 
-  // Event
-  const eventDoc = await adminDb.collection("events").doc(teamData.eventId).get();
-  let event = null;
-  if (eventDoc.exists) {
-    const ed = eventDoc.data()!;
-    const startDate = ed.startDate?.toDate ? ed.startDate.toDate().toISOString() : new Date(ed.startDate).toISOString();
-    event = { id: eventDoc.id, ...ed, startDate };
-  }
-
-  // Creator
-  const creatorDoc = await adminDb.collection("users").doc(teamData.creatorId).get();
-  const creator = creatorDoc.exists
-    ? {
-        id: creatorDoc.id,
-        name: creatorDoc.data()!.name,
-        username: creatorDoc.data()!.username,
-        avatar: creatorDoc.data()!.avatar,
-        bio: creatorDoc.data()!.bio,
-        college: creatorDoc.data()!.college,
-        location: creatorDoc.data()!.location,
-      }
-    : null;
-
-  // Members
-  const membersSnap = await adminDb
-    .collection("teamMembers")
-    .where("teamId", "==", params.id)
-    .get();
-
-  const members = await Promise.all(
-    membersSnap.docs.map(async (m) => {
-      const md = m.data();
-      const uDoc = await adminDb.collection("users").doc(md.userId).get();
-      return {
-        id: m.id,
-        ...md,
-        user: uDoc.exists
-          ? {
-              id: uDoc.id,
-              name: uDoc.data()!.name,
-              username: uDoc.data()!.username,
-              avatar: uDoc.data()!.avatar,
-              bio: uDoc.data()!.bio,
-              college: uDoc.data()!.college,
-              location: uDoc.data()!.location,
-              skills: uDoc.data()!.skills,
-            }
-          : null,
-      };
-    })
-  );
-
-  // Join Requests
-  const jrSnap = await adminDb
-    .collection("joinRequests")
-    .where("teamId", "==", params.id)
-    .orderBy("createdAt", "desc")
-    .get();
-
-  const joinRequests = await Promise.all(
-    jrSnap.docs.map(async (jr) => {
-      const jrd = jr.data();
-      const uDoc = await adminDb.collection("users").doc(jrd.userId).get();
-      return {
-        id: jr.id,
-        ...jrd,
-        user: uDoc.exists
-          ? {
-              id: uDoc.id,
-              name: uDoc.data()!.name,
-              username: uDoc.data()!.username,
-              avatar: uDoc.data()!.avatar,
-              college: uDoc.data()!.college,
-              location: uDoc.data()!.location,
-              skills: uDoc.data()!.skills,
-              interests: uDoc.data()!.interests,
-            }
-          : null,
-      };
-    })
-  );
+  const joinRequests = tinydb.collection("joinRequests")
+    .findMany((jr: any) => jr.teamId === params.id)
+    .map((jr: any) => {
+      const u = tinydb.collection("users").findUnique((usr: any) => usr.id === jr.userId);
+      return { id: jr.id, ...jr, user: u };
+    });
 
   const team = {
     ...teamData,

@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-import { adminDb } from "./firebase-admin";
+import { tinydb } from "./tinydb";
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || "teamsync_super_secret_jwt_key_2026_neo_brutalism"
@@ -50,7 +50,7 @@ export async function setSessionCookie(payload: SessionPayload) {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    maxAge: 30 * 24 * 60 * 60,
   });
 }
 
@@ -68,11 +68,9 @@ export async function getCurrentUser() {
     const payload = await verifySessionToken(token);
     if (!payload?.userId) return null;
 
-    const user = await adminDb.collection("users").doc(payload.userId).get();
-    if (!user.exists) return null;
-    const userData = { id: user.id, ...user.data() } as any;
-    if (!userData || userData.isSuspended) return null;
-    return userData;
+    const user = tinydb.collection("users").findUnique((u: any) => u.id === payload.userId);
+    if (!user || user.isSuspended) return null;
+    return user;
   } catch {
     return null;
   }

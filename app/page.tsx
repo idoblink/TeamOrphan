@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { TeamCard } from "@/components/cards/TeamCard";
@@ -25,119 +25,41 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  let totalMemberships = 0;
-  let totalActiveTeams = 0;
-  let totalEvents = 0;
-  let activeTeams: any[] = [];
-  let activeOrphans: any[] = [];
+  const totalMemberships = tinydb.collection("teamMembers").count();
+  const totalActiveTeams = tinydb.collection("teams").count((t: any) => t.status === "OPEN");
+  const totalEvents = tinydb.collection("events").count();
 
-  try {
-    const [membershipsSnap, openTeamsSnap, eventsSnap] = await Promise.all([
-      adminDb.collection("teamMembers").get(),
-      adminDb.collection("teams").where("status", "==", "OPEN").get(),
-      adminDb.collection("events").get(),
-    ]);
+  const activeTeamsRaw = tinydb.collection("teams").findMany((t: any) => t.status === "OPEN").slice(0, 6);
+  const activeTeams = activeTeamsRaw.map((t: any) => {
+    const event = tinydb.collection("events").findUnique((e: any) => e.id === t.eventId);
+    const creator = tinydb.collection("users").findUnique((u: any) => u.id === t.creatorId);
+    const members = tinydb.collection("teamMembers")
+      .findMany((m: any) => m.teamId === t.id)
+      .map((m: any) => {
+        const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+        return { id: m.id, ...m, user: u ? { name: u.name, avatar: u.avatar } : null };
+      });
 
-    totalMemberships = membershipsSnap.size;
-    totalActiveTeams = openTeamsSnap.size;
-    totalEvents = eventsSnap.size;
+    return {
+      ...t,
+      event,
+      creator: creator ? { id: creator.id, name: creator.name, username: creator.username, avatar: creator.avatar } : null,
+      members,
+      _count: { members: members.length },
+    };
+  }).filter((t: any) => t.event !== null);
 
-    const activeTeamsRaw = openTeamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
-    activeTeams = (
-      await Promise.all(
-        activeTeamsRaw.slice(0, 6).map(async (t) => {
-          try {
-            const eDoc = await adminDb.collection("events").doc(t.eventId).get();
-            const eventData = eDoc.exists ? ({ id: eDoc.id, ...eDoc.data() } as any) : null;
-            if (!eventData) return null;
-
-            // Normalize startDate to Date object or ISO string for client components
-            const startDate = eventData.startDate?.toDate ? eventData.startDate.toDate() : new Date(eventData.startDate);
-            const event = { ...eventData, startDate };
-
-            const cDoc = await adminDb.collection("users").doc(t.creatorId).get();
-            const creator = cDoc.exists
-              ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar }
-              : null;
-
-            const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
-            const members = await Promise.all(
-              membersSnap.docs.map(async (m) => {
-                const md = m.data();
-                const uDoc = await adminDb.collection("users").doc(md.userId).get();
-                return {
-                  id: m.id,
-                  ...md,
-                  user: uDoc.exists ? { name: uDoc.data()!.name, avatar: uDoc.data()!.avatar } : null,
-                };
-              })
-            );
-
-            return {
-              ...t,
-              event,
-              creator,
-              members,
-              _count: { members: membersSnap.size },
-            };
-          } catch {
-            return null;
-          }
-        })
-      )
-    ).filter(Boolean);
-
-    const orphansSnap = await adminDb
-      .collection("orphanListings")
-      .where("status", "==", "ACTIVE")
-      .limit(3)
-      .get();
-
-    activeOrphans = (
-      await Promise.all(
-        orphansSnap.docs.map(async (o) => {
-          try {
-            const od = { id: o.id, ...o.data() } as any;
-            const uDoc = await adminDb.collection("users").doc(od.userId).get();
-            const user = uDoc.exists
-              ? {
-                  id: uDoc.id,
-                  name: uDoc.data()!.name,
-                  username: uDoc.data()!.username,
-                  avatar: uDoc.data()!.avatar,
-                  college: uDoc.data()!.college,
-                  location: uDoc.data()!.location,
-                }
-              : null;
-
-            let targetEvent = null;
-            if (od.targetEventId) {
-              const eDoc = await adminDb.collection("events").doc(od.targetEventId).get();
-              if (eDoc.exists) {
-                const ed = eDoc.data()!;
-                const startDate = ed.startDate?.toDate ? ed.startDate.toDate() : new Date(ed.startDate);
-                targetEvent = { id: eDoc.id, ...ed, startDate };
-              }
-            }
-
-            return {
-              ...od,
-              user,
-              targetEvent,
-            };
-          } catch {
-            return null;
-          }
-        })
-      )
-    ).filter(Boolean);
-  } catch (err) {
-    console.error("HomePage Firestore query error:", err);
-  }
-
-  // Featured urgent team for hero poster
   const featuredTeam = activeTeams[0] || null;
   const featuredSkills = featuredTeam ? parseJsonArray(featuredTeam.requiredSkills) : [];
+
+  const activeOrphans = tinydb.collection("orphanListings")
+    .findMany((o: any) => o.status === "ACTIVE")
+    .slice(0, 3)
+    .map((o: any) => {
+      const user = tinydb.collection("users").findUnique((u: any) => u.id === o.userId);
+      const targetEvent = o.targetEventId ? tinydb.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
+      return { ...o, user, targetEvent };
+    });
 
   const categories = [
     { name: "Hackathons", icon: Code, color: "bg-brutal-yellow" },
@@ -212,11 +134,9 @@ export default async function HomePage() {
             {/* Right Hero Poster (Urgent Spot Card) */}
             <div className="lg:col-span-5">
               <div className="relative">
-                {/* Decorative Background Offset Box */}
                 <div className="absolute -inset-3 bg-black transform rotate-1 hidden sm:block"></div>
 
                 <div className="relative border-4 border-black bg-white p-6 sm:p-8 shadow-brutal-xl space-y-6">
-                  {/* Badge Row */}
                   <div className="flex items-center justify-between">
                     <span className="border-2 border-black bg-brutal-pink text-white font-heading px-3 py-1 text-xs font-black uppercase tracking-wider animate-pulse shadow-[2px_2px_0px_#000]">
                       🔥 LIVE RECRUITMENT
@@ -226,7 +146,6 @@ export default async function HomePage() {
                     </span>
                   </div>
 
-                  {/* Event Title Mockup */}
                   <div className="space-y-1">
                     <div className="text-xs font-black uppercase tracking-wider text-neutral-500">
                       {featuredTeam?.event?.category || "National Hackathon"}
@@ -240,7 +159,6 @@ export default async function HomePage() {
                     </p>
                   </div>
 
-                  {/* Urgent Countdown */}
                   {featuredTeam?.event?.startDate && (
                     <div className="space-y-1">
                       <div className="text-[10px] font-black uppercase tracking-wider text-black">
@@ -250,7 +168,6 @@ export default async function HomePage() {
                     </div>
                   )}
 
-                  {/* Missing Skills Tags */}
                   <div className="space-y-2">
                     <div className="text-[10px] font-black uppercase tracking-wider text-neutral-600">
                       Required Stack to Qualify:
@@ -270,7 +187,6 @@ export default async function HomePage() {
                     </div>
                   </div>
 
-                  {/* Apply Action */}
                   <div className="pt-2">
                     <Link href={featuredTeam ? `/teams/${featuredTeam.id}` : "/discover"}>
                       <button className="w-full border-3 border-black bg-black py-3 text-center font-heading text-sm font-black uppercase tracking-wider text-white shadow-brutal hover:bg-neutral-800 transition-colors">
@@ -403,8 +319,8 @@ export default async function HomePage() {
             </BrutalCard>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {activeTeams.map((team) => (
-                <TeamCard key={team.id} team={team as any} />
+              {activeTeams.map((team: any) => (
+                <TeamCard key={team.id} team={team} />
               ))}
             </div>
           )}
@@ -473,8 +389,8 @@ export default async function HomePage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {activeOrphans.map((orphan) => (
-              <OrphanCard key={orphan.id} listing={orphan as any} />
+            {activeOrphans.map((orphan: any) => (
+              <OrphanCard key={orphan.id} listing={orphan} />
             ))}
           </div>
         </div>

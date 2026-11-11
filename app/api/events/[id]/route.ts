@@ -1,83 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const eventDoc = await adminDb.collection("events").doc(params.id).get();
-    if (!eventDoc.exists) {
+    const event = tinydb.collection("events").findUnique((e: any) => e.id === params.id);
+    if (!event) {
       return NextResponse.json({ error: "Event not found" }, { status: 404 });
     }
-    const eventData = { id: eventDoc.id, ...eventDoc.data() } as any;
 
-    // Creator
-    let createdBy = null;
-    if (eventData.createdById) {
-      const uDoc = await adminDb.collection("users").doc(eventData.createdById).get();
-      if (uDoc.exists) {
-        const ud = uDoc.data()!;
-        createdBy = { id: uDoc.id, name: ud.name, username: ud.username, avatar: ud.avatar };
-      }
-    }
+    const createdBy = event.createdById
+      ? tinydb.collection("users").findUnique((u: any) => u.id === event.createdById)
+      : null;
 
-    // Teams
-    const teamsSnap = await adminDb
-      .collection("teams")
-      .where("eventId", "==", params.id)
-      .get();
-    const teams = await Promise.all(
-      teamsSnap.docs.map(async (t) => {
-        const td = { id: t.id, ...t.data() } as any;
-
-        const creatorDoc = await adminDb.collection("users").doc(td.creatorId).get();
-        const creator = creatorDoc.exists
-          ? { id: creatorDoc.id, name: creatorDoc.data()!.name, username: creatorDoc.data()!.username, avatar: creatorDoc.data()!.avatar }
-          : null;
-
-        const membersSnap = await adminDb
-          .collection("teamMembers")
-          .where("teamId", "==", t.id)
-          .get();
-        const members = await Promise.all(
-          membersSnap.docs.map(async (m) => {
-            const md = m.data();
-            const uDoc = await adminDb.collection("users").doc(md.userId).get();
-            return {
-              id: m.id,
-              ...md,
-              user: uDoc.exists
-                ? { id: uDoc.id, name: uDoc.data()!.name, username: uDoc.data()!.username, avatar: uDoc.data()!.avatar, skills: uDoc.data()!.skills }
-                : null,
-            };
-          })
-        );
-
-        return { ...td, creator, members, _count: { members: membersSnap.size } };
-      })
-    );
-
-    // Orphan listings
-    const orphansSnap = await adminDb
-      .collection("orphanListings")
-      .where("targetEventId", "==", params.id)
-      .where("status", "==", "ACTIVE")
-      .get();
-    const orphanListings = await Promise.all(
-      orphansSnap.docs.map(async (o) => {
-        const od = { id: o.id, ...o.data() } as any;
-        const uDoc = await adminDb.collection("users").doc(od.userId).get();
+    const teams = tinydb.collection("teams")
+      .findMany((t: any) => t.eventId === params.id)
+      .map((t: any) => {
+        const creator = tinydb.collection("users").findUnique((u: any) => u.id === t.creatorId);
+        const members = tinydb.collection("teamMembers")
+          .findMany((m: any) => m.teamId === t.id)
+          .map((m: any) => {
+            const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+            return { ...m, user: u };
+          });
         return {
-          ...od,
-          user: uDoc.exists
-            ? { id: uDoc.id, name: uDoc.data()!.name, username: uDoc.data()!.username, avatar: uDoc.data()!.avatar, college: uDoc.data()!.college, location: uDoc.data()!.location, skills: uDoc.data()!.skills }
-            : null,
+          ...t,
+          creator: creator ? { id: creator.id, name: creator.name, username: creator.username, avatar: creator.avatar } : null,
+          members,
+          _count: { members: members.length },
         };
-      })
-    );
+      });
 
-    return NextResponse.json({ event: { ...eventData, createdBy, teams, orphanListings } });
+    const orphanListings = tinydb.collection("orphanListings")
+      .findMany((o: any) => o.targetEventId === params.id && o.status === "ACTIVE")
+      .map((o: any) => {
+        const user = tinydb.collection("users").findUnique((u: any) => u.id === o.userId);
+        return { ...o, user };
+      });
+
+    return NextResponse.json({
+      event: {
+        ...event,
+        createdBy: createdBy ? { id: createdBy.id, name: createdBy.name, username: createdBy.username, avatar: createdBy.avatar } : null,
+        teams,
+        orphanListings,
+      },
+    });
   } catch (error: any) {
     console.error("Event fetch error:", error);
     return NextResponse.json({ error: "Failed to fetch event" }, { status: 500 });

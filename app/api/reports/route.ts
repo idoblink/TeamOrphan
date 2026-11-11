@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { ReportSchema } from "@/lib/validation";
-import { FieldValue } from "firebase-admin/firestore";
 
 export async function GET() {
   try {
@@ -11,36 +10,20 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const snap = await adminDb
-      .collection("reports")
-      .orderBy("createdAt", "desc")
-      .get();
-
-    const reports = await Promise.all(
-      snap.docs.map(async (d) => {
-        const r = { id: d.id, ...d.data() } as any;
-
-        let reporter = null;
-        if (r.reporterId) {
-          const rDoc = await adminDb.collection("users").doc(r.reporterId).get();
-          if (rDoc.exists) reporter = { id: rDoc.id, name: rDoc.data()!.name, username: rDoc.data()!.username };
-        }
-
-        let reportedUser = null;
-        if (r.reportedUserId) {
-          const ruDoc = await adminDb.collection("users").doc(r.reportedUserId).get();
-          if (ruDoc.exists) reportedUser = { id: ruDoc.id, name: ruDoc.data()!.name, username: ruDoc.data()!.username, isSuspended: ruDoc.data()!.isSuspended };
-        }
-
-        let team = null;
-        if (r.teamId) {
-          const tDoc = await adminDb.collection("teams").doc(r.teamId).get();
-          if (tDoc.exists) team = { id: tDoc.id, name: tDoc.data()!.name, status: tDoc.data()!.status };
-        }
-
-        return { ...r, reporter, reportedUser, team };
-      })
-    );
+    const reports = tinydb.collection("reports")
+      .findMany()
+      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .map((r: any) => {
+        const reporter = r.reporterId ? tinydb.collection("users").findUnique((u: any) => u.id === r.reporterId) : null;
+        const reportedUser = r.reportedUserId ? tinydb.collection("users").findUnique((u: any) => u.id === r.reportedUserId) : null;
+        const team = r.teamId ? tinydb.collection("teams").findUnique((t: any) => t.id === r.teamId) : null;
+        return {
+          ...r,
+          reporter: reporter ? { id: reporter.id, name: reporter.name, username: reporter.username } : null,
+          reportedUser: reportedUser ? { id: reportedUser.id, name: reportedUser.name, username: reportedUser.username, isSuspended: reportedUser.isSuspended } : null,
+          team: team ? { id: team.id, name: team.name, status: team.status } : null,
+        };
+      });
 
     return NextResponse.json({ reports });
   } catch (error: any) {
@@ -67,18 +50,16 @@ export async function POST(req: NextRequest) {
     }
 
     const { reportedUserId, teamId, reason } = validated.data;
-    const now = FieldValue.serverTimestamp();
 
-    const reportRef = await adminDb.collection("reports").add({
+    const report = tinydb.collection("reports").insert({
       reporterId: user.id,
       reportedUserId: reportedUserId || null,
       teamId: teamId || null,
       reason,
       status: "PENDING",
-      createdAt: now,
     });
 
-    return NextResponse.json({ success: true, report: { id: reportRef.id } });
+    return NextResponse.json({ success: true, report });
   } catch (error: any) {
     console.error("Report submit error:", error);
     return NextResponse.json({ error: "Failed to submit report" }, { status: 500 });
@@ -98,8 +79,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
 
-    await adminDb.collection("reports").doc(id).update({ status });
-    return NextResponse.json({ success: true });
+    const report = tinydb.collection("reports").update(id, { status });
+    return NextResponse.json({ success: true, report });
   } catch (error: any) {
     console.error("Report update error:", error);
     return NextResponse.json({ error: "Failed to update report" }, { status: 500 });

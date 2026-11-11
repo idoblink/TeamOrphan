@@ -37,3 +37,6 @@ next-env.d.ts
 # SQLite local dev database
 prisma/*.db
 prisma/*.db-journal
+
+# TinyDB local runtime data
+/.data/

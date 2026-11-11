@@ -1,4 +1,4 @@
-// lib/db.ts
-// Re-export adminDb as the unified `db` import used throughout API routes.
-// This replaces the former Prisma singleton.
-export { adminDb as db } from "./firebase-admin";
+import { tinydb } from "./tinydb";
+
+export { tinydb as db, tinydb };
+export default tinydb;

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
-import { FieldValue } from "firebase-admin/firestore";
 
 export async function GET() {
   try {
@@ -10,14 +9,11 @@ export async function GET() {
       return NextResponse.json({ notifications: [], unreadCount: 0 });
     }
 
-    const snap = await adminDb
-      .collection("notifications")
-      .where("userId", "==", user.id)
-      .orderBy("createdAt", "desc")
-      .limit(30)
-      .get();
+    const notifications = tinydb.collection("notifications")
+      .findMany((n: any) => n.userId === user.id)
+      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 30);
 
-    const notifications = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const unreadCount = notifications.filter((n: any) => !n.read).length;
 
     return NextResponse.json({ notifications, unreadCount });
@@ -35,22 +31,17 @@ export async function PATCH(req: NextRequest) {
     }
 
     const { id, markAllRead } = await req.json();
-    const now = FieldValue.serverTimestamp();
 
     if (markAllRead) {
-      const snap = await adminDb
-        .collection("notifications")
-        .where("userId", "==", user.id)
-        .where("read", "==", false)
-        .get();
-      const batch = adminDb.batch();
-      snap.docs.forEach((d) => batch.update(d.ref, { read: true }));
-      await batch.commit();
+      tinydb.collection("notifications").updateMany(
+        (n: any) => n.userId === user.id && !n.read,
+        { read: true }
+      );
       return NextResponse.json({ success: true });
     }
 
     if (id) {
-      await adminDb.collection("notifications").doc(id).update({ read: true });
+      tinydb.collection("notifications").update(id, { read: true });
       return NextResponse.json({ success: true });
     }
 

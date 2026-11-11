@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
-import { FieldValue } from "firebase-admin/firestore";
 
 export async function GET() {
   try {
@@ -10,26 +9,19 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const snap = await adminDb.collection("teams").orderBy("createdAt", "desc").get();
+    const teams = tinydb.collection("teams").findMany().map((t: any) => {
+      const event = tinydb.collection("events").findUnique((e: any) => e.id === t.eventId);
+      const creator = tinydb.collection("users").findUnique((u: any) => u.id === t.creatorId);
+      const membersCount = tinydb.collection("teamMembers").count((m: any) => m.teamId === t.id);
+      const reportsCount = tinydb.collection("reports").count((r: any) => r.teamId === t.id);
 
-    const teams = await Promise.all(
-      snap.docs.map(async (d) => {
-        const t = { id: d.id, ...d.data() } as any;
-
-        const eventDoc = await adminDb.collection("events").doc(t.eventId).get();
-        const event = eventDoc.exists ? { id: eventDoc.id, ...eventDoc.data() } : null;
-
-        const creatorDoc = await adminDb.collection("users").doc(t.creatorId).get();
-        const creator = creatorDoc.exists
-          ? { id: creatorDoc.id, name: creatorDoc.data()!.name, username: creatorDoc.data()!.username }
-          : null;
-
-        const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", d.id).get();
-        const reportsSnap = await adminDb.collection("reports").where("teamId", "==", d.id).get();
-
-        return { ...t, event, creator, _count: { members: membersSnap.size, reports: reportsSnap.size } };
-      })
-    );
+      return {
+        ...t,
+        event,
+        creator: creator ? { id: creator.id, name: creator.name, username: creator.username } : null,
+        _count: { members: membersCount, reports: reportsCount },
+      };
+    });
 
     return NextResponse.json({ teams });
   } catch (error: any) {
@@ -46,11 +38,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const { teamId, status } = await req.json();
-
-    await adminDb.collection("teams").doc(teamId).update({
-      status,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+    tinydb.collection("teams").update(teamId, { status });
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

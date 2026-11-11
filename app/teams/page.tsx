@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { TeamCard } from "@/components/cards/TeamCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
@@ -25,98 +25,65 @@ export default async function TeamsPage({ searchParams }: TeamsPageProps) {
   const search = searchParams.search || "";
   const urgency = searchParams.urgency || "ALL";
 
-  let teamsWithMatches: any[] = [];
+  const rawTeams = tinydb.collection("teams").findMany().map((t: any) => {
+    const event = tinydb.collection("events").findUnique((e: any) => e.id === t.eventId);
+    const creator = tinydb.collection("users").findUnique((u: any) => u.id === t.creatorId);
+    const members = tinydb.collection("teamMembers")
+      .findMany((m: any) => m.teamId === t.id)
+      .map((m: any) => {
+        const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+        return { id: m.id, ...m, user: u ? { name: u.name, avatar: u.avatar } : null };
+      });
 
-  try {
-    const teamsSnap = await adminDb.collection("teams").orderBy("createdAt", "desc").get();
-    let rawTeams = teamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+    return {
+      ...t,
+      event,
+      creator: creator ? { id: creator.id, name: creator.name, username: creator.username, avatar: creator.avatar } : null,
+      members,
+      _count: { members: members.length },
+    };
+  }).filter((t: any) => t.event !== null);
 
-    // Enrich teams
-    rawTeams = await Promise.all(
-      rawTeams.map(async (t) => {
-        try {
-          const eDoc = await adminDb.collection("events").doc(t.eventId).get();
-          if (!eDoc.exists) return null;
-          const ed = eDoc.data()!;
-          const startDate = ed.startDate?.toDate ? ed.startDate.toDate().toISOString() : new Date(ed.startDate).toISOString();
-          const event = { id: eDoc.id, ...ed, startDate };
-
-          const cDoc = await adminDb.collection("users").doc(t.creatorId).get();
-          const creator = cDoc.exists
-            ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar }
-            : null;
-
-          const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
-          const members = await Promise.all(
-            membersSnap.docs.map(async (m) => {
-              const md = m.data();
-              const uDoc = await adminDb.collection("users").doc(md.userId).get();
-              return {
-                id: m.id,
-                ...md,
-                user: uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, avatar: uDoc.data()!.avatar } : null,
-              };
-            })
-          );
-
-          return {
-            ...t,
-            event,
-            creator,
-            members,
-            _count: { members: membersSnap.size },
-          };
-        } catch {
-          return null;
-        }
-      })
+  let teams = rawTeams;
+  if (category !== "ALL") teams = teams.filter((t: any) => t.event?.category === category);
+  if (mode !== "ALL") teams = teams.filter((t: any) => t.event?.mode === mode);
+  if (search) {
+    const s = search.toLowerCase();
+    teams = teams.filter(
+      (t: any) =>
+        t.name?.toLowerCase().includes(s) ||
+        t.description?.toLowerCase().includes(s) ||
+        t.requiredSkills?.toLowerCase().includes(s) ||
+        t.event?.name?.toLowerCase().includes(s)
     );
+  }
 
-    rawTeams = rawTeams.filter((t) => t && t.event);
+  if (urgency === "urgent") {
+    const now = new Date().getTime();
+    teams = teams.filter((t: any) => {
+      const start = new Date(t.event.startDate).getTime();
+      const cutoff = start - 24 * 60 * 60 * 1000;
+      const remaining = cutoff - now;
+      return remaining > 0 && remaining <= 24 * 60 * 60 * 1000;
+    });
+  }
 
-    if (category !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.category === category);
-    if (mode !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.mode === mode);
-    if (search) {
-      const s = search.toLowerCase();
-      rawTeams = rawTeams.filter(
-        (t) =>
-          t.name?.toLowerCase().includes(s) ||
-          t.description?.toLowerCase().includes(s) ||
-          t.requiredSkills?.toLowerCase().includes(s) ||
-          t.event?.name?.toLowerCase().includes(s)
+  const teamsWithMatches = teams.map((team: any) => {
+    let match = null;
+    if (user) {
+      match = calculateCompatibility(
+        { skills: (user as any).skills, interests: (user as any).interests, location: (user as any).location },
+        {
+          requiredSkills: team.requiredSkills,
+          preferredSkills: team.preferredSkills,
+          category: team.event.category,
+          location: team.event.location,
+          mode: team.event.mode,
+        }
       );
     }
-
-    let teams = rawTeams;
-    if (urgency === "urgent") {
-      const now = new Date().getTime();
-      teams = rawTeams.filter((t) => {
-        const start = new Date(t.event.startDate).getTime();
-        const cutoff = start - 24 * 60 * 60 * 1000;
-        const remaining = cutoff - now;
-        return remaining > 0 && remaining <= 24 * 60 * 60 * 1000;
-      });
-    }
-
-    teamsWithMatches = teams.map((team) => {
-      let match = null;
-      if (user) {
-        match = calculateCompatibility(
-          { skills: (user as any).skills, interests: (user as any).interests, location: (user as any).location },
-          {
-            requiredSkills: team.requiredSkills,
-            preferredSkills: team.preferredSkills,
-            category: team.event.category,
-            location: team.event.location,
-            mode: team.event.mode,
-          }
-        );
-      }
-      return { team, match };
-    });
-  } catch (err) {
-    console.error("Teams fetch error:", err);
-  }
+    return { team, match };
+  });
 
   const categories = [
     "ALL",
@@ -240,8 +207,8 @@ export default async function TeamsPage({ searchParams }: TeamsPageProps) {
         </BrutalCard>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {teamsWithMatches.map(({ team, match }) => (
-            <TeamCard key={team.id} team={team as any} match={match} />
+          {teamsWithMatches.map(({ team, match }: any) => (
+            <TeamCard key={team.id} team={team} match={match} />
           ))}
         </div>
       )}

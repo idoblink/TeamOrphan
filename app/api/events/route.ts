@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { CreateEventSchema } from "@/lib/validation";
-import { FieldValue } from "firebase-admin/firestore";
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,55 +10,35 @@ export async function GET(req: NextRequest) {
     const mode = searchParams.get("mode");
     const search = searchParams.get("search");
 
-    let query: FirebaseFirestore.Query = adminDb.collection("events").orderBy("startDate", "asc");
-    const snap = await query.get();
-
-    let events = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+    let events = tinydb.collection("events").findMany();
 
     if (category && category !== "ALL") {
-      events = events.filter((e) => e.category === category);
+      events = events.filter((e: any) => e.category === category);
     }
     if (mode && mode !== "ALL") {
-      events = events.filter((e) => e.mode === mode);
+      events = events.filter((e: any) => e.mode === mode);
     }
     if (search) {
       const s = search.toLowerCase();
       events = events.filter(
-        (e) =>
+        (e: any) =>
           e.name?.toLowerCase().includes(s) ||
           e.description?.toLowerCase().includes(s) ||
           e.location?.toLowerCase().includes(s)
       );
     }
 
-    // Enrich with counts and creator
-    const enriched = await Promise.all(
-      events.map(async (event) => {
-        const teamsSnap = await adminDb
-          .collection("teams")
-          .where("eventId", "==", event.id)
-          .get();
-        const orphansSnap = await adminDb
-          .collection("orphanListings")
-          .where("targetEventId", "==", event.id)
-          .get();
+    const enriched = events.map((event: any) => {
+      const teamsCount = tinydb.collection("teams").count((t: any) => t.eventId === event.id);
+      const orphansCount = tinydb.collection("orphanListings").count((o: any) => o.targetEventId === event.id);
+      const creator = event.createdById ? tinydb.collection("users").findUnique((u: any) => u.id === event.createdById) : null;
 
-        let createdBy = null;
-        if (event.createdById) {
-          const uDoc = await adminDb.collection("users").doc(event.createdById).get();
-          if (uDoc.exists) {
-            const ud = uDoc.data()!;
-            createdBy = { id: uDoc.id, name: ud.name, username: ud.username };
-          }
-        }
-
-        return {
-          ...event,
-          createdBy,
-          _count: { teams: teamsSnap.size, orphanListings: orphansSnap.size },
-        };
-      })
-    );
+      return {
+        ...event,
+        createdBy: creator ? { id: creator.id, name: creator.name, username: creator.username } : null,
+        _count: { teams: teamsCount, orphanListings: orphansCount },
+      };
+    });
 
     return NextResponse.json({ events: enriched });
   } catch (error: any) {
@@ -86,21 +65,18 @@ export async function POST(req: NextRequest) {
     }
 
     const { name, description, category, startDate, location, mode } = validated.data;
-    const now = FieldValue.serverTimestamp();
 
-    const eventRef = await adminDb.collection("events").add({
+    const event = tinydb.collection("events").insert({
       name,
       description,
       category,
-      startDate: new Date(startDate),
+      startDate: new Date(startDate).toISOString(),
       location,
       mode,
       createdById: user.id,
-      createdAt: now,
-      updatedAt: now,
     });
 
-    return NextResponse.json({ success: true, event: { id: eventRef.id, name, description, category, startDate, location, mode } });
+    return NextResponse.json({ success: true, event });
   } catch (error: any) {
     console.error("Create event error:", error);
     return NextResponse.json({ error: "Failed to create event" }, { status: 500 });

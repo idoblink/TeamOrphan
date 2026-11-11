@@ -9,7 +9,6 @@ import { Zap, Heart, ShieldAlert } from "lucide-react";
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   variable: "--font-heading",
-  weight: ["400", "500", "600", "700"],
   display: "swap",
   fallback: ["system-ui", "sans-serif"],
 });

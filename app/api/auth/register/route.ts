@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { hashPassword, setSessionCookie } from "@/lib/auth";
 import { RegisterSchema } from "@/lib/validation";
-import { FieldValue } from "firebase-admin/firestore";
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,32 +20,21 @@ export async function POST(req: NextRequest) {
     const usernameLower = username.toLowerCase();
 
     // Check existing email
-    const emailSnap = await adminDb
-      .collection("users")
-      .where("email", "==", emailLower)
-      .limit(1)
-      .get();
-    if (!emailSnap.empty) {
+    const existingEmail = tinydb.collection("users").findFirst((u: any) => u.email?.toLowerCase() === emailLower);
+    if (existingEmail) {
       return NextResponse.json({ error: "Email already registered" }, { status: 400 });
     }
 
     // Check existing username
-    const usernameSnap = await adminDb
-      .collection("users")
-      .where("username", "==", usernameLower)
-      .limit(1)
-      .get();
-    if (!usernameSnap.empty) {
+    const existingUsername = tinydb.collection("users").findFirst((u: any) => u.username?.toLowerCase() === usernameLower);
+    if (existingUsername) {
       return NextResponse.json({ error: "Username already taken" }, { status: 400 });
     }
 
     const bcrypt = await import("bcryptjs");
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const userRef = adminDb.collection("users").doc();
-    const now = FieldValue.serverTimestamp();
-
-    const userData = {
+    const user = tinydb.collection("users").insert({
       name,
       email: emailLower,
       username: usernameLower,
@@ -59,27 +47,23 @@ export async function POST(req: NextRequest) {
       interests: JSON.stringify(interests || []),
       role: "USER",
       isSuspended: false,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await userRef.set(userData);
+    });
 
     await setSessionCookie({
-      userId: userRef.id,
-      email: emailLower,
-      username: usernameLower,
-      role: "USER",
+      userId: user.id,
+      email: user.email,
+      username: user.username,
+      role: user.role,
     });
 
     return NextResponse.json({
       success: true,
       user: {
-        id: userRef.id,
-        name,
-        username: usernameLower,
-        email: emailLower,
-        role: "USER",
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        role: user.role,
       },
     });
   } catch (error: any) {

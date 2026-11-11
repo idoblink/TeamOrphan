@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
-import { FieldValue } from "firebase-admin/firestore";
 
 export async function GET() {
   try {
@@ -10,32 +9,26 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const snap = await adminDb.collection("users").orderBy("createdAt", "desc").get();
+    const users = tinydb.collection("users").findMany().map((u: any) => {
+      const createdTeamsCount = tinydb.collection("teams").count((t: any) => t.creatorId === u.id);
+      const membershipsCount = tinydb.collection("teamMembers").count((m: any) => m.userId === u.id);
+      const reportsAgainstCount = tinydb.collection("reports").count((r: any) => r.reportedUserId === u.id);
 
-    const users = await Promise.all(
-      snap.docs.map(async (d) => {
-        const u = { id: d.id, ...d.data() } as any;
-
-        const teamsSnap = await adminDb.collection("teams").where("creatorId", "==", d.id).get();
-        const membershipsSnap = await adminDb.collection("teamMembers").where("userId", "==", d.id).get();
-        const reportsSnap = await adminDb.collection("reports").where("reportedUserId", "==", d.id).get();
-
-        return {
-          id: u.id,
-          name: u.name,
-          username: u.username,
-          email: u.email,
-          role: u.role,
-          isSuspended: u.isSuspended,
-          createdAt: u.createdAt,
-          _count: {
-            createdTeams: teamsSnap.size,
-            memberships: membershipsSnap.size,
-            reportsAgainst: reportsSnap.size,
-          },
-        };
-      })
-    );
+      return {
+        id: u.id,
+        name: u.name,
+        username: u.username,
+        email: u.email,
+        role: u.role,
+        isSuspended: u.isSuspended,
+        createdAt: u.createdAt,
+        _count: {
+          createdTeams: createdTeamsCount,
+          memberships: membershipsCount,
+          reportsAgainst: reportsAgainstCount,
+        },
+      };
+    });
 
     return NextResponse.json({ users });
   } catch (error: any) {
@@ -53,11 +46,11 @@ export async function PATCH(req: NextRequest) {
 
     const { userId, isSuspended, role } = await req.json();
 
-    const data: any = { updatedAt: FieldValue.serverTimestamp() };
+    const data: any = {};
     if (typeof isSuspended === "boolean") data.isSuspended = isSuspended;
     if (role && ["USER", "ADMIN"].includes(role)) data.role = role;
 
-    await adminDb.collection("users").doc(userId).update(data);
+    tinydb.collection("users").update(userId, data);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Admin user update error:", error);

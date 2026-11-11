@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { TeamCard } from "@/components/cards/TeamCard";
 import { OrphanCard } from "@/components/cards/OrphanCard";
@@ -18,41 +18,29 @@ export default async function EventDetailPage({
   params: { id: string };
 }) {
   const user = await getCurrentUser();
-  const eventDoc = await adminDb.collection("events").doc(params.id).get();
-  if (!eventDoc.exists) notFound();
+  const event = tinydb.collection("events").findUnique((e: any) => e.id === params.id);
+  if (!event) notFound();
 
-  const rawEventData = { id: eventDoc.id, ...eventDoc.data() } as any;
-  const startDate = rawEventData.startDate?.toDate ? rawEventData.startDate.toDate().toISOString() : new Date(rawEventData.startDate).toISOString();
-  const eventData = { ...rawEventData, startDate };
+  const teams = tinydb.collection("teams")
+    .findMany((t: any) => t.eventId === params.id)
+    .map((t: any) => {
+      const creator = tinydb.collection("users").findUnique((u: any) => u.id === t.creatorId);
+      const members = tinydb.collection("teamMembers")
+        .findMany((m: any) => m.teamId === t.id)
+        .map((m: any) => {
+          const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+          return { id: m.id, ...m, user: u ? { name: u.name, avatar: u.avatar } : null };
+        });
+      return { ...t, creator, members, event, _count: { members: members.length } };
+    });
 
-  // Fetch teams
-  const teamsSnap = await adminDb.collection("teams").where("eventId", "==", params.id).get();
-  const teams = await Promise.all(
-    teamsSnap.docs.map(async (t) => {
-      const td = { id: t.id, ...t.data() } as any;
-      const creatorDoc = await adminDb.collection("users").doc(td.creatorId).get();
-      const creator = creatorDoc.exists ? { id: creatorDoc.id, name: creatorDoc.data()!.name, username: creatorDoc.data()!.username, avatar: creatorDoc.data()!.avatar } : null;
-      const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
-      const members = membersSnap.docs.map((m) => ({ id: m.id, ...m.data() }));
-      return { ...td, creator, members, event: eventData, _count: { members: membersSnap.size } };
-    })
-  );
+  const orphanListings = tinydb.collection("orphanListings")
+    .findMany((o: any) => o.targetEventId === params.id && o.status === "ACTIVE")
+    .map((o: any) => {
+      const u = tinydb.collection("users").findUnique((usr: any) => usr.id === o.userId);
+      return { ...o, targetEvent: event, user: u };
+    });
 
-  // Fetch orphan listings
-  const orphansSnap = await adminDb.collection("orphanListings").where("targetEventId", "==", params.id).where("status", "==", "ACTIVE").get();
-  const orphanListings = await Promise.all(
-    orphansSnap.docs.map(async (o) => {
-      const od = { id: o.id, ...o.data() } as any;
-      const uDoc = await adminDb.collection("users").doc(od.userId).get();
-      return {
-        ...od,
-        targetEvent: eventData,
-        user: uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, username: uDoc.data()!.username, avatar: uDoc.data()!.avatar, college: uDoc.data()!.college, location: uDoc.data()!.location, skills: uDoc.data()!.skills } : null,
-      };
-    })
-  );
-
-  const event = { ...eventData, teams, orphanListings };
   const catStyle = getCategoryColor(event.category);
 
   return (
@@ -116,7 +104,7 @@ export default async function EventDetailPage({
             <Users className="w-5 h-5 text-black" />
             <div>
               <div className="text-[10px] text-neutral-500">ACTIVE SQUADS</div>
-              <div>{event.teams.length} Teams Competing</div>
+              <div>{teams.length} Teams Competing</div>
             </div>
           </div>
         </div>
@@ -131,7 +119,7 @@ export default async function EventDetailPage({
           <div className="flex items-center gap-2">
             <Users className="w-6 h-6 stroke-[3] text-black" />
             <h2 className="font-heading text-2xl font-black uppercase text-black">
-              TEAMS IN THIS EVENT ({event.teams.length})
+              TEAMS IN THIS EVENT ({teams.length})
             </h2>
           </div>
           <Link href={`/create/team?eventId=${event.id}`}>
@@ -141,7 +129,7 @@ export default async function EventDetailPage({
           </Link>
         </div>
 
-        {event.teams.length === 0 ? (
+        {teams.length === 0 ? (
           <BrutalCard variant="muted" shadowSize="sm" className="text-center py-10 space-y-3">
             <h3 className="font-heading text-lg font-black uppercase text-black">
               NO TEAMS REGISTERED YET
@@ -157,7 +145,7 @@ export default async function EventDetailPage({
           </BrutalCard>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {event.teams.map((team: any) => (
+            {teams.map((team: any) => (
               <TeamCard key={team.id} team={{ ...team, event }} />
             ))}
           </div>
@@ -165,17 +153,17 @@ export default async function EventDetailPage({
       </div>
 
       {/* Orphans Looking For This Event */}
-      {event.orphanListings.length > 0 && (
+      {orphanListings.length > 0 && (
         <div className="space-y-6">
           <div className="flex items-center gap-2 border-b-3 border-black pb-3">
             <Sparkles className="w-6 h-6 stroke-[3] text-brutal-green" />
             <h2 className="font-heading text-2xl font-black uppercase text-black">
-              INDIVIDUALS LOOKING TO JOIN THIS EVENT ({event.orphanListings.length})
+              INDIVIDUALS LOOKING TO JOIN THIS EVENT ({orphanListings.length})
             </h2>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {event.orphanListings.map((orphan: any) => (
+            {orphanListings.map((orphan: any) => (
               <OrphanCard
                 key={orphan.id}
                 listing={{ ...orphan, targetEvent: event }}

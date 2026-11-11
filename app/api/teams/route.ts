@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { CreateTeamSchema } from "@/lib/validation";
 import { checkRecruitmentAllowed } from "@/lib/cutoff";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,62 +13,40 @@ export async function GET(req: NextRequest) {
     const urgency = searchParams.get("urgency");
     const skill = searchParams.get("skill");
 
-    // Fetch all teams (Firestore doesn't support complex joins — we filter in-memory)
-    let teamsQuery = adminDb.collection("teams").orderBy("createdAt", "desc");
-    const teamsSnap = await teamsQuery.get();
+    const teamsRaw = tinydb.collection("teams").findMany();
 
-    const teamsRaw = teamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+    // Enrich teams
+    const enriched = teamsRaw.map((team: any) => {
+      const event = tinydb.collection("events").findUnique((e: any) => e.id === team.eventId);
+      const creator = tinydb.collection("users").findUnique((u: any) => u.id === team.creatorId);
+      const members = tinydb.collection("teamMembers")
+        .findMany((m: any) => m.teamId === team.id)
+        .map((m: any) => {
+          const user = tinydb.collection("users").findUnique((u: any) => u.id === m.userId);
+          return { ...m, user };
+        });
 
-    // Enrich with event data
-    const eventIds = Array.from(new Set(teamsRaw.map((t: any) => t.eventId)));
-    const eventsMap: Record<string, any> = {};
-    for (const eid of eventIds) {
-      const eDoc = await adminDb.collection("events").doc(eid).get();
-      if (eDoc.exists) eventsMap[eid] = { id: eDoc.id, ...eDoc.data() };
-    }
+      return {
+        ...team,
+        event,
+        creator: creator ? { id: creator.id, name: creator.name, username: creator.username, avatar: creator.avatar } : null,
+        members,
+        _count: { members: members.length },
+      };
+    });
 
-    // Enrich with creator + members
-    const enriched = await Promise.all(
-      teamsRaw.map(async (team: any) => {
-        const event = eventsMap[team.eventId] || null;
-        const creatorDoc = await adminDb.collection("users").doc(team.creatorId).get();
-        const creator = creatorDoc.exists
-          ? { id: creatorDoc.id, name: creatorDoc.data()!.name, username: creatorDoc.data()!.username, avatar: creatorDoc.data()!.avatar }
-          : null;
-
-        const membersSnap = await adminDb
-          .collection("teamMembers")
-          .where("teamId", "==", team.id)
-          .get();
-        const members = await Promise.all(
-          membersSnap.docs.map(async (m) => {
-            const md = m.data();
-            const uDoc = await adminDb.collection("users").doc(md.userId).get();
-            return {
-              id: m.id,
-              ...md,
-              user: uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, username: uDoc.data()!.username, avatar: uDoc.data()!.avatar } : null,
-            };
-          })
-        );
-
-        return { ...team, event, creator, members };
-      })
-    );
-
-    // Apply filters
-    let filtered = enriched.filter((t) => t.event !== null);
+    let filtered = enriched.filter((t: any) => t.event !== null);
 
     if (category && category !== "ALL") {
-      filtered = filtered.filter((t) => t.event?.category === category);
+      filtered = filtered.filter((t: any) => t.event?.category === category);
     }
     if (mode && mode !== "ALL") {
-      filtered = filtered.filter((t) => t.event?.mode === mode);
+      filtered = filtered.filter((t: any) => t.event?.mode === mode);
     }
     if (search) {
       const s = search.toLowerCase();
       filtered = filtered.filter(
-        (t) =>
+        (t: any) =>
           t.name?.toLowerCase().includes(s) ||
           t.description?.toLowerCase().includes(s) ||
           t.requiredSkills?.toLowerCase().includes(s) ||
@@ -77,20 +54,20 @@ export async function GET(req: NextRequest) {
       );
     }
     if (skill) {
-      filtered = filtered.filter((t) => t.requiredSkills?.toLowerCase().includes(skill.toLowerCase()));
+      filtered = filtered.filter((t: any) => t.requiredSkills?.toLowerCase().includes(skill.toLowerCase()));
     }
     if (urgency === "urgent") {
       const now = Date.now();
-      filtered = filtered.filter((t) => {
-        const start = new Date(t.event.startDate._seconds ? t.event.startDate._seconds * 1000 : t.event.startDate).getTime();
+      filtered = filtered.filter((t: any) => {
+        const start = new Date(t.event.startDate).getTime();
         const cutoff = start - 24 * 60 * 60 * 1000;
         const remaining = cutoff - now;
         return remaining > 0 && remaining <= 24 * 60 * 60 * 1000;
       });
     } else if (urgency === "open") {
       const now = Date.now();
-      filtered = filtered.filter((t) => {
-        const start = new Date(t.event.startDate._seconds ? t.event.startDate._seconds * 1000 : t.event.startDate).getTime();
+      filtered = filtered.filter((t: any) => {
+        const start = new Date(t.event.startDate).getTime();
         const cutoff = start - 24 * 60 * 60 * 1000;
         return now < cutoff && t.status === "OPEN";
       });
@@ -123,24 +100,17 @@ export async function POST(req: NextRequest) {
     const { name, eventId, maxMembers, description, requiredSkills, preferredSkills, contactInfo } =
       validated.data;
 
-    // Verify event exists
-    const eventDoc = await adminDb.collection("events").doc(eventId).get();
-    if (!eventDoc.exists) {
+    const event = tinydb.collection("events").findUnique((e: any) => e.id === eventId);
+    if (!event) {
       return NextResponse.json({ error: "Event not found" }, { status: 404 });
     }
 
-    const eventData = eventDoc.data()!;
-    const startDate = eventData.startDate?.toDate ? eventData.startDate.toDate() : new Date(eventData.startDate);
-    const cutoffCheck = checkRecruitmentAllowed(startDate);
+    const cutoffCheck = checkRecruitmentAllowed(new Date(event.startDate));
     if (!cutoffCheck.allowed) {
       return NextResponse.json({ error: cutoffCheck.reason }, { status: 400 });
     }
 
-    const batch = adminDb.batch();
-    const teamRef = adminDb.collection("teams").doc();
-    const now = FieldValue.serverTimestamp();
-
-    batch.set(teamRef, {
+    const team = tinydb.collection("teams").insert({
       name,
       eventId,
       creatorId: user.id,
@@ -150,36 +120,15 @@ export async function POST(req: NextRequest) {
       preferredSkills: JSON.stringify(preferredSkills || []),
       contactInfo: contactInfo || null,
       status: "OPEN",
-      createdAt: now,
-      updatedAt: now,
     });
 
-    // Add creator as LEADER member
-    const memberRef = adminDb.collection("teamMembers").doc();
-    batch.set(memberRef, {
-      teamId: teamRef.id,
+    tinydb.collection("teamMembers").insert({
+      teamId: team.id,
       userId: user.id,
       role: "LEADER",
-      joinedAt: now,
     });
 
-    await batch.commit();
-
-    const team = {
-      id: teamRef.id,
-      name,
-      eventId,
-      creatorId: user.id,
-      maxMembers,
-      description,
-      requiredSkills: JSON.stringify(requiredSkills),
-      preferredSkills: JSON.stringify(preferredSkills || []),
-      contactInfo: contactInfo || null,
-      status: "OPEN",
-      event: { id: eventDoc.id, ...eventData },
-    };
-
-    return NextResponse.json({ success: true, team });
+    return NextResponse.json({ success: true, team: { ...team, event } });
   } catch (error: any) {
     console.error("Create team error:", error);
     return NextResponse.json({ error: "Failed to create team" }, { status: 500 });
