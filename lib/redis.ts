@@ -296,3 +296,4 @@ export const redisDb = global._redisDb || (global._redisDb = new RedisDatabase()
 export const db = redisDb;
 export const tinydb = redisDb; // Backwards-compatible alias
 export default redisDb;
+
