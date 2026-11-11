@@ -99,7 +99,7 @@ export const BrutalNavbar: React.FC<{ initialUser?: NavbarUser | null }> = ({
         {/* Brand Logo */}
         <Link href="/" className="flex items-center gap-2 group">
           <div className="border-3 border-black bg-brutal-yellow px-2.5 py-1 text-base sm:text-lg font-black tracking-tighter text-black shadow-brutal-sm group-hover:-translate-x-0.5 group-hover:-translate-y-0.5 transition-transform">
-            TEAM<span className="bg-black text-white px-1 ml-0.5">ORPHAN</span>
+            TEAM<span className="bg-black text-white px-1 ml-0.5">SYNC</span>
           </div>
         </Link>
 

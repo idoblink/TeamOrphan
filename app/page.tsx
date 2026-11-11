@@ -25,93 +25,119 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  // Fetch real counts from Firestore
-  const [membershipsSnap, openTeamsSnap, eventsSnap] = await Promise.all([
-    adminDb.collection("teamMembers").get(),
-    adminDb.collection("teams").where("status", "==", "OPEN").get(),
-    adminDb.collection("events").get(),
-  ]);
+  let totalMemberships = 0;
+  let totalActiveTeams = 0;
+  let totalEvents = 0;
+  let activeTeams: any[] = [];
+  let activeOrphans: any[] = [];
 
-  const totalMemberships = membershipsSnap.size;
-  const totalActiveTeams = openTeamsSnap.size;
-  const totalEvents = eventsSnap.size;
+  try {
+    const [membershipsSnap, openTeamsSnap, eventsSnap] = await Promise.all([
+      adminDb.collection("teamMembers").get(),
+      adminDb.collection("teams").where("status", "==", "OPEN").get(),
+      adminDb.collection("events").get(),
+    ]);
 
-  // Fetch active teams
-  const activeTeamsRaw = openTeamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
-  const activeTeams = (
-    await Promise.all(
-      activeTeamsRaw.slice(0, 6).map(async (t) => {
-        const eDoc = await adminDb.collection("events").doc(t.eventId).get();
-        const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+    totalMemberships = membershipsSnap.size;
+    totalActiveTeams = openTeamsSnap.size;
+    totalEvents = eventsSnap.size;
 
-        const cDoc = await adminDb.collection("users").doc(t.creatorId).get();
-        const creator = cDoc.exists
-          ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar }
-          : null;
+    const activeTeamsRaw = openTeamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+    activeTeams = (
+      await Promise.all(
+        activeTeamsRaw.slice(0, 6).map(async (t) => {
+          try {
+            const eDoc = await adminDb.collection("events").doc(t.eventId).get();
+            const eventData = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+            if (!eventData) return null;
 
-        const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
-        const members = await Promise.all(
-          membersSnap.docs.map(async (m) => {
-            const md = m.data();
-            const uDoc = await adminDb.collection("users").doc(md.userId).get();
+            // Normalize startDate to Date object or ISO string for client components
+            const startDate = eventData.startDate?.toDate ? eventData.startDate.toDate() : new Date(eventData.startDate);
+            const event = { ...eventData, startDate };
+
+            const cDoc = await adminDb.collection("users").doc(t.creatorId).get();
+            const creator = cDoc.exists
+              ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar }
+              : null;
+
+            const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
+            const members = await Promise.all(
+              membersSnap.docs.map(async (m) => {
+                const md = m.data();
+                const uDoc = await adminDb.collection("users").doc(md.userId).get();
+                return {
+                  id: m.id,
+                  ...md,
+                  user: uDoc.exists ? { name: uDoc.data()!.name, avatar: uDoc.data()!.avatar } : null,
+                };
+              })
+            );
+
             return {
-              id: m.id,
-              ...md,
-              user: uDoc.exists ? { name: uDoc.data()!.name, avatar: uDoc.data()!.avatar } : null,
+              ...t,
+              event,
+              creator,
+              members,
+              _count: { members: membersSnap.size },
             };
-          })
-        );
+          } catch {
+            return null;
+          }
+        })
+      )
+    ).filter(Boolean);
 
-        return {
-          ...t,
-          event,
-          creator,
-          members,
-          _count: { members: membersSnap.size },
-        };
-      })
-    )
-  ).filter((t) => t.event !== null);
+    const orphansSnap = await adminDb
+      .collection("orphanListings")
+      .where("status", "==", "ACTIVE")
+      .limit(3)
+      .get();
+
+    activeOrphans = (
+      await Promise.all(
+        orphansSnap.docs.map(async (o) => {
+          try {
+            const od = { id: o.id, ...o.data() } as any;
+            const uDoc = await adminDb.collection("users").doc(od.userId).get();
+            const user = uDoc.exists
+              ? {
+                  id: uDoc.id,
+                  name: uDoc.data()!.name,
+                  username: uDoc.data()!.username,
+                  avatar: uDoc.data()!.avatar,
+                  college: uDoc.data()!.college,
+                  location: uDoc.data()!.location,
+                }
+              : null;
+
+            let targetEvent = null;
+            if (od.targetEventId) {
+              const eDoc = await adminDb.collection("events").doc(od.targetEventId).get();
+              if (eDoc.exists) {
+                const ed = eDoc.data()!;
+                const startDate = ed.startDate?.toDate ? ed.startDate.toDate() : new Date(ed.startDate);
+                targetEvent = { id: eDoc.id, ...ed, startDate };
+              }
+            }
+
+            return {
+              ...od,
+              user,
+              targetEvent,
+            };
+          } catch {
+            return null;
+          }
+        })
+      )
+    ).filter(Boolean);
+  } catch (err) {
+    console.error("HomePage Firestore query error:", err);
+  }
 
   // Featured urgent team for hero poster
   const featuredTeam = activeTeams[0] || null;
   const featuredSkills = featuredTeam ? parseJsonArray(featuredTeam.requiredSkills) : [];
-
-  // Fetch active orphans looking for teams
-  const orphansSnap = await adminDb
-    .collection("orphanListings")
-    .where("status", "==", "ACTIVE")
-    .limit(3)
-    .get();
-
-  const activeOrphans = await Promise.all(
-    orphansSnap.docs.map(async (o) => {
-      const od = { id: o.id, ...o.data() } as any;
-      const uDoc = await adminDb.collection("users").doc(od.userId).get();
-      const user = uDoc.exists
-        ? {
-            id: uDoc.id,
-            name: uDoc.data()!.name,
-            username: uDoc.data()!.username,
-            avatar: uDoc.data()!.avatar,
-            college: uDoc.data()!.college,
-            location: uDoc.data()!.location,
-          }
-        : null;
-
-      let targetEvent = null;
-      if (od.targetEventId) {
-        const eDoc = await adminDb.collection("events").doc(od.targetEventId).get();
-        if (eDoc.exists) targetEvent = { id: eDoc.id, ...eDoc.data() };
-      }
-
-      return {
-        ...od,
-        user,
-        targetEvent,
-      };
-    })
-  );
 
   const categories = [
     { name: "Hackathons", icon: Code, color: "bg-brutal-yellow" },
