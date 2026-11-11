@@ -103,7 +103,7 @@ export default function AdminPage() {
           <p className="text-xs font-bold text-neutral-700 mt-2">{error}</p>
           <div className="pt-4">
             <BrutalButton variant="black" size="sm" onClick={() => router.push("/login")}>
-              Log in as Admin (admin@teamorphan.org)
+              Log in as Admin (admin@teamsync.org)
             </BrutalButton>
           </div>
         </div>

@@ -1,23 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { getCurrentUser } from "@/lib/auth";
 import { ReportSchema } from "@/lib/validation";
+import { FieldValue } from "firebase-admin/firestore";
 
 export async function GET() {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role !== "ADMIN") {
+    if (!user || (user as any).role !== "ADMIN") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const reports = await db.report.findMany({
-      include: {
-        reporter: { select: { id: true, name: true, username: true } },
-        reportedUser: { select: { id: true, name: true, username: true, isSuspended: true } },
-        team: { select: { id: true, name: true, status: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const snap = await adminDb
+      .collection("reports")
+      .orderBy("createdAt", "desc")
+      .get();
+
+    const reports = await Promise.all(
+      snap.docs.map(async (d) => {
+        const r = { id: d.id, ...d.data() } as any;
+
+        let reporter = null;
+        if (r.reporterId) {
+          const rDoc = await adminDb.collection("users").doc(r.reporterId).get();
+          if (rDoc.exists) reporter = { id: rDoc.id, name: rDoc.data()!.name, username: rDoc.data()!.username };
+        }
+
+        let reportedUser = null;
+        if (r.reportedUserId) {
+          const ruDoc = await adminDb.collection("users").doc(r.reportedUserId).get();
+          if (ruDoc.exists) reportedUser = { id: ruDoc.id, name: ruDoc.data()!.name, username: ruDoc.data()!.username, isSuspended: ruDoc.data()!.isSuspended };
+        }
+
+        let team = null;
+        if (r.teamId) {
+          const tDoc = await adminDb.collection("teams").doc(r.teamId).get();
+          if (tDoc.exists) team = { id: tDoc.id, name: tDoc.data()!.name, status: tDoc.data()!.status };
+        }
+
+        return { ...r, reporter, reportedUser, team };
+      })
+    );
 
     return NextResponse.json({ reports });
   } catch (error: any) {
@@ -44,18 +67,18 @@ export async function POST(req: NextRequest) {
     }
 
     const { reportedUserId, teamId, reason } = validated.data;
+    const now = FieldValue.serverTimestamp();
 
-    const report = await db.report.create({
-      data: {
-        reporterId: user.id,
-        reportedUserId: reportedUserId || null,
-        teamId: teamId || null,
-        reason,
-        status: "PENDING",
-      },
+    const reportRef = await adminDb.collection("reports").add({
+      reporterId: user.id,
+      reportedUserId: reportedUserId || null,
+      teamId: teamId || null,
+      reason,
+      status: "PENDING",
+      createdAt: now,
     });
 
-    return NextResponse.json({ success: true, report });
+    return NextResponse.json({ success: true, report: { id: reportRef.id } });
   } catch (error: any) {
     console.error("Report submit error:", error);
     return NextResponse.json({ error: "Failed to submit report" }, { status: 500 });
@@ -65,7 +88,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role !== "ADMIN") {
+    if (!user || (user as any).role !== "ADMIN") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
@@ -75,12 +98,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
 
-    const report = await db.report.update({
-      where: { id },
-      data: { status },
-    });
-
-    return NextResponse.json({ success: true, report });
+    await adminDb.collection("reports").doc(id).update({ status });
+    return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Report update error:", error);
     return NextResponse.json({ error: "Failed to update report" }, { status: 500 });

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { EventCard } from "@/components/cards/EventCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
@@ -20,24 +20,28 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const mode = searchParams.mode || "ALL";
   const search = searchParams.search || "";
 
-  const whereClause: any = {};
-  if (category !== "ALL") whereClause.category = category;
-  if (mode !== "ALL") whereClause.mode = mode;
+  const snap = await adminDb.collection("events").orderBy("startDate", "asc").get();
+  let rawEvents = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+
+  if (category !== "ALL") rawEvents = rawEvents.filter((e) => e.category === category);
+  if (mode !== "ALL") rawEvents = rawEvents.filter((e) => e.mode === mode);
   if (search) {
-    whereClause.OR = [
-      { name: { contains: search } },
-      { description: { contains: search } },
-      { location: { contains: search } },
-    ];
+    const s = search.toLowerCase();
+    rawEvents = rawEvents.filter(
+      (e) =>
+        e.name?.toLowerCase().includes(s) ||
+        e.description?.toLowerCase().includes(s) ||
+        e.location?.toLowerCase().includes(s)
+    );
   }
 
-  const events = await db.event.findMany({
-    where: whereClause,
-    include: {
-      _count: { select: { teams: true } },
-    },
-    orderBy: { startDate: "asc" },
-  });
+  // Enrich with team counts
+  const events = await Promise.all(
+    rawEvents.map(async (event) => {
+      const teamsSnap = await adminDb.collection("teams").where("eventId", "==", event.id).get();
+      return { ...event, _count: { teams: teamsSnap.size } };
+    })
+  );
 
   const categories = [
     "ALL",

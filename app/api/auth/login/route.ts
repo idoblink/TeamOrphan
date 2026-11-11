@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { comparePassword, setSessionCookie } from "@/lib/auth";
 import { LoginSchema } from "@/lib/validation";
 
@@ -15,15 +15,27 @@ export async function POST(req: NextRequest) {
     const { login, password } = validated.data;
     const loginLower = login.toLowerCase();
 
-    const user = await db.user.findFirst({
-      where: {
-        OR: [{ email: loginLower }, { username: loginLower }],
-      },
-    });
+    // Try email first, then username
+    let userSnap = await adminDb
+      .collection("users")
+      .where("email", "==", loginLower)
+      .limit(1)
+      .get();
 
-    if (!user) {
+    if (userSnap.empty) {
+      userSnap = await adminDb
+        .collection("users")
+        .where("username", "==", loginLower)
+        .limit(1)
+        .get();
+    }
+
+    if (userSnap.empty) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
+
+    const userDoc = userSnap.docs[0];
+    const user = { id: userDoc.id, ...userDoc.data() } as any;
 
     if (user.isSuspended) {
       return NextResponse.json(
@@ -32,7 +44,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const isValid = await comparePassword(password, user.passwordHash);
+    const bcrypt = await import("bcryptjs");
+    const isValid = await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }

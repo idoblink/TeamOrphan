@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { getCurrentUser } from "@/lib/auth";
 import { TeamCard } from "@/components/cards/TeamCard";
 import { OrphanCard } from "@/components/cards/OrphanCard";
@@ -18,40 +18,39 @@ export default async function EventDetailPage({
   params: { id: string };
 }) {
   const user = await getCurrentUser();
-  const event = await db.event.findUnique({
-    where: { id: params.id },
-    include: {
-      createdBy: { select: { name: true, username: true, avatar: true } },
-      teams: {
-        include: {
-          creator: { select: { id: true, name: true, username: true, avatar: true } },
-          members: { include: { user: { select: { name: true, avatar: true } } } },
-          _count: { select: { members: true } },
-        },
-      },
-      orphanListings: {
-        where: { status: "ACTIVE" },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              username: true,
-              avatar: true,
-              college: true,
-              location: true,
-              skills: true,
-            },
-          },
-        },
-      },
-    },
-  });
+  const eventDoc = await adminDb.collection("events").doc(params.id).get();
+  if (!eventDoc.exists) notFound();
 
-  if (!event) {
-    notFound();
-  }
+  const eventData = { id: eventDoc.id, ...eventDoc.data() } as any;
 
+  // Fetch teams
+  const teamsSnap = await adminDb.collection("teams").where("eventId", "==", params.id).get();
+  const teams = await Promise.all(
+    teamsSnap.docs.map(async (t) => {
+      const td = { id: t.id, ...t.data() } as any;
+      const creatorDoc = await adminDb.collection("users").doc(td.creatorId).get();
+      const creator = creatorDoc.exists ? { id: creatorDoc.id, name: creatorDoc.data()!.name, username: creatorDoc.data()!.username, avatar: creatorDoc.data()!.avatar } : null;
+      const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
+      const members = membersSnap.docs.map((m) => ({ id: m.id, ...m.data() }));
+      return { ...td, creator, members, event: eventData, _count: { members: membersSnap.size } };
+    })
+  );
+
+  // Fetch orphan listings
+  const orphansSnap = await adminDb.collection("orphanListings").where("targetEventId", "==", params.id).where("status", "==", "ACTIVE").get();
+  const orphanListings = await Promise.all(
+    orphansSnap.docs.map(async (o) => {
+      const od = { id: o.id, ...o.data() } as any;
+      const uDoc = await adminDb.collection("users").doc(od.userId).get();
+      return {
+        ...od,
+        targetEvent: eventData,
+        user: uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, username: uDoc.data()!.username, avatar: uDoc.data()!.avatar, college: uDoc.data()!.college, location: uDoc.data()!.location, skills: uDoc.data()!.skills } : null,
+      };
+    })
+  );
+
+  const event = { ...eventData, teams, orphanListings };
   const catStyle = getCategoryColor(event.category);
 
   return (
@@ -156,7 +155,7 @@ export default async function EventDetailPage({
           </BrutalCard>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {event.teams.map((team) => (
+            {event.teams.map((team: any) => (
               <TeamCard key={team.id} team={{ ...team, event }} />
             ))}
           </div>
@@ -174,7 +173,7 @@ export default async function EventDetailPage({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {event.orphanListings.map((orphan) => (
+            {event.orphanListings.map((orphan: any) => (
               <OrphanCard
                 key={orphan.id}
                 listing={{ ...orphan, targetEvent: event }}

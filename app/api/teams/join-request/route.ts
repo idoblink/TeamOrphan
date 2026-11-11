@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { getCurrentUser } from "@/lib/auth";
 import { JoinRequestSchema } from "@/lib/validation";
 import { checkRecruitmentAllowed } from "@/lib/cutoff";
+import { FieldValue } from "firebase-admin/firestore";
 
 // POST: Submit a Join Request
 export async function POST(req: NextRequest) {
@@ -24,21 +25,23 @@ export async function POST(req: NextRequest) {
 
     const { teamId, message } = validated.data;
 
-    // Fetch team with event & members
-    const team = await db.team.findUnique({
-      where: { id: teamId },
-      include: {
-        event: true,
-        members: true,
-      },
-    });
-
-    if (!team) {
+    // Fetch team
+    const teamDoc = await adminDb.collection("teams").doc(teamId).get();
+    if (!teamDoc.exists) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
+    const team = { id: teamDoc.id, ...teamDoc.data() } as any;
 
-    // 1. Server-side 24-Hour Cutoff Rule Enforcement
-    const cutoffCheck = checkRecruitmentAllowed(team.event.startDate);
+    // Fetch event for cutoff check
+    const eventDoc = await adminDb.collection("events").doc(team.eventId).get();
+    if (!eventDoc.exists) {
+      return NextResponse.json({ error: "Event not found" }, { status: 404 });
+    }
+    const eventData = eventDoc.data()!;
+    const startDate = eventData.startDate?.toDate ? eventData.startDate.toDate() : new Date(eventData.startDate);
+
+    // 1. 24-Hour Cutoff Rule
+    const cutoffCheck = checkRecruitmentAllowed(startDate);
     if (!cutoffCheck.allowed) {
       return NextResponse.json({ error: cutoffCheck.reason }, { status: 400 });
     }
@@ -48,77 +51,77 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "You cannot request to join your own team." }, { status: 400 });
     }
 
-    // 3. Prevent joining if already a member
-    if (team.members.some((m) => m.userId === user.id)) {
+    // Fetch members
+    const membersSnap = await adminDb
+      .collection("teamMembers")
+      .where("teamId", "==", teamId)
+      .get();
+
+    // 3. Already a member
+    if (membersSnap.docs.some((m) => m.data().userId === user.id)) {
       return NextResponse.json({ error: "You are already a member of this team." }, { status: 400 });
     }
 
-    // 4. Check if team is full
-    if (team.members.length >= team.maxMembers || team.status === "FULL" || team.status === "CLOSED") {
+    // 4. Team full
+    if (membersSnap.size >= team.maxMembers || team.status === "FULL" || team.status === "CLOSED") {
       return NextResponse.json({ error: "This team is already full." }, { status: 400 });
     }
 
-    // 5. Check if duplicate request exists
-    const existing = await db.joinRequest.findUnique({
-      where: {
-        teamId_userId: {
-          teamId,
-          userId: user.id,
-        },
-      },
-    });
+    // 5. Check duplicate request
+    const existingSnap = await adminDb
+      .collection("joinRequests")
+      .where("teamId", "==", teamId)
+      .where("userId", "==", user.id)
+      .limit(1)
+      .get();
 
-    if (existing) {
-      if (existing.status === "PENDING") {
+    const now = FieldValue.serverTimestamp();
+
+    if (!existingSnap.empty) {
+      const existing = existingSnap.docs[0];
+      const existingData = existing.data();
+
+      if (existingData.status === "PENDING") {
         return NextResponse.json({ error: "You already have a pending join request for this team." }, { status: 400 });
       }
-      if (existing.status === "REJECTED") {
-        // Allow updating rejected request to pending with new message
-        const updated = await db.joinRequest.update({
-          where: { id: existing.id },
-          data: {
-            message: message || null,
-            status: "PENDING",
-          },
+      if (existingData.status === "REJECTED") {
+        await existing.ref.update({ message: message || null, status: "PENDING", updatedAt: now });
+
+        await adminDb.collection("notifications").add({
+          userId: team.creatorId,
+          type: "JOIN_REQUEST",
+          title: `New Join Request: ${team.name}`,
+          message: `${user.name} sent a join request for ${team.name}.`,
+          link: `/teams/${team.id}`,
+          read: false,
+          createdAt: now,
         });
 
-        // Notify team creator
-        await db.notification.create({
-          data: {
-            userId: team.creatorId,
-            type: "JOIN_REQUEST",
-            title: `New Join Request: ${team.name}`,
-            message: `${user.name} sent a join request for ${team.name}.`,
-            link: `/teams/${team.id}`,
-          },
-        });
-
-        return NextResponse.json({ success: true, joinRequest: updated });
+        return NextResponse.json({ success: true, joinRequest: { id: existing.id, ...existingData, status: "PENDING" } });
       }
     }
 
     // Create new join request
-    const joinRequest = await db.joinRequest.create({
-      data: {
-        teamId,
-        userId: user.id,
-        message: message || null,
-        status: "PENDING",
-      },
+    const jrRef = await adminDb.collection("joinRequests").add({
+      teamId,
+      userId: user.id,
+      message: message || null,
+      status: "PENDING",
+      createdAt: now,
+      updatedAt: now,
     });
 
-    // Notify team creator
-    await db.notification.create({
-      data: {
-        userId: team.creatorId,
-        type: "JOIN_REQUEST",
-        title: `New Join Request: ${team.name}`,
-        message: `${user.name} sent a request to join ${team.name} for ${team.event.name}.`,
-        link: `/teams/${team.id}`,
-      },
+    await adminDb.collection("notifications").add({
+      userId: team.creatorId,
+      type: "JOIN_REQUEST",
+      title: `New Join Request: ${team.name}`,
+      message: `${user.name} sent a request to join ${team.name} for ${eventData.name}.`,
+      link: `/teams/${team.id}`,
+      read: false,
+      createdAt: now,
     });
 
-    return NextResponse.json({ success: true, joinRequest });
+    return NextResponse.json({ success: true, joinRequest: { id: jrRef.id, teamId, userId: user.id, message, status: "PENDING" } });
   } catch (error: any) {
     console.error("Join request error:", error);
     return NextResponse.json({ error: "Failed to submit join request" }, { status: 500 });
@@ -133,114 +136,104 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { requestId, action } = await req.json(); // action: "ACCEPT" | "REJECT"
+    const { requestId, action } = await req.json();
 
     if (!requestId || !["ACCEPT", "REJECT"].includes(action)) {
       return NextResponse.json({ error: "Invalid action or request ID" }, { status: 400 });
     }
 
-    const joinRequest = await db.joinRequest.findUnique({
-      where: { id: requestId },
-      include: {
-        team: {
-          include: {
-            event: true,
-            members: true,
-          },
-        },
-        user: true,
-      },
-    });
-
-    if (!joinRequest) {
+    const jrDoc = await adminDb.collection("joinRequests").doc(requestId).get();
+    if (!jrDoc.exists) {
       return NextResponse.json({ error: "Join request not found" }, { status: 404 });
     }
+    const jr = { id: jrDoc.id, ...jrDoc.data() } as any;
 
-    // Verify user is team leader or admin
-    if (joinRequest.team.creatorId !== user.id && user.role !== "ADMIN") {
+    const teamDoc = await adminDb.collection("teams").doc(jr.teamId).get();
+    if (!teamDoc.exists) {
+      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+    }
+    const team = { id: teamDoc.id, ...teamDoc.data() } as any;
+
+    if (team.creatorId !== user.id && user.role !== "ADMIN") {
       return NextResponse.json({ error: "Only the team leader can manage join requests" }, { status: 403 });
     }
 
-    if (action === "REJECT") {
-      await db.joinRequest.update({
-        where: { id: requestId },
-        data: { status: "REJECTED" },
-      });
+    const now = FieldValue.serverTimestamp();
 
-      // Notify candidate
-      await db.notification.create({
-        data: {
-          userId: joinRequest.userId,
-          type: "REQUEST_REJECTED",
-          title: "Join Request Update",
-          message: `Your request to join ${joinRequest.team.name} was not accepted at this time.`,
-          link: `/discover`,
-        },
+    if (action === "REJECT") {
+      await jrDoc.ref.update({ status: "REJECTED", updatedAt: now });
+
+      await adminDb.collection("notifications").add({
+        userId: jr.userId,
+        type: "REQUEST_REJECTED",
+        title: "Join Request Update",
+        message: `Your request to join ${team.name} was not accepted at this time.`,
+        link: `/discover`,
+        read: false,
+        createdAt: now,
       });
 
       return NextResponse.json({ success: true, status: "REJECTED" });
     }
 
-    // Action === "ACCEPT"
-    // Server-side cutoff check
-    const cutoffCheck = checkRecruitmentAllowed(joinRequest.team.event.startDate);
+    // ACCEPT
+    const eventDoc = await adminDb.collection("events").doc(team.eventId).get();
+    const eventData = eventDoc.data()!;
+    const startDate = eventData.startDate?.toDate ? eventData.startDate.toDate() : new Date(eventData.startDate);
+
+    const cutoffCheck = checkRecruitmentAllowed(startDate);
     if (!cutoffCheck.allowed) {
       return NextResponse.json({ error: cutoffCheck.reason }, { status: 400 });
     }
 
-    // Check capacity
-    const currentMemberCount = joinRequest.team.members.length;
-    if (currentMemberCount >= joinRequest.team.maxMembers) {
+    const membersSnap = await adminDb
+      .collection("teamMembers")
+      .where("teamId", "==", jr.teamId)
+      .get();
+
+    if (membersSnap.size >= team.maxMembers) {
       return NextResponse.json({ error: "This team is already at maximum capacity." }, { status: 400 });
     }
 
-    // Add member in transaction
-    await db.$transaction(async (tx) => {
-      // 1. Create team member
-      await tx.teamMember.create({
-        data: {
-          teamId: joinRequest.teamId,
-          userId: joinRequest.userId,
-          role: "MEMBER",
-        },
-      });
+    // Batch: add member, update request, check if full, notify
+    const batch = adminDb.batch();
 
-      // 2. Mark request as ACCEPTED
-      await tx.joinRequest.update({
-        where: { id: requestId },
-        data: { status: "ACCEPTED" },
-      });
-
-      // 3. Update orphan listing if user had one
-      await tx.orphanListing.updateMany({
-        where: {
-          userId: joinRequest.userId,
-          status: "ACTIVE",
-          targetEventId: joinRequest.team.eventId,
-        },
-        data: { status: "MATCHED" },
-      });
-
-      // 4. Check if team is now full
-      const newCount = currentMemberCount + 1;
-      if (newCount >= joinRequest.team.maxMembers) {
-        await tx.team.update({
-          where: { id: joinRequest.teamId },
-          data: { status: "FULL" },
-        });
-      }
-
-      // 5. Send acceptance notification
-      await tx.notification.create({
-        data: {
-          userId: joinRequest.userId,
-          type: "REQUEST_ACCEPTED",
-          title: "🎉 Request Accepted!",
-          message: `Congratulations! You have joined team ${joinRequest.team.name} for ${joinRequest.team.event.name}.`,
-          link: `/teams/${joinRequest.teamId}`,
-        },
-      });
+    const newMemberRef = adminDb.collection("teamMembers").doc();
+    batch.set(newMemberRef, {
+      teamId: jr.teamId,
+      userId: jr.userId,
+      role: "MEMBER",
+      joinedAt: now,
     });
+
+    batch.update(jrDoc.ref, { status: "ACCEPTED", updatedAt: now });
+
+    const newCount = membersSnap.size + 1;
+    if (newCount >= team.maxMembers) {
+      batch.update(adminDb.collection("teams").doc(jr.teamId), { status: "FULL", updatedAt: now });
+    }
+
+    const notifRef = adminDb.collection("notifications").doc();
+    batch.set(notifRef, {
+      userId: jr.userId,
+      type: "REQUEST_ACCEPTED",
+      title: "🎉 Request Accepted!",
+      message: `Congratulations! You have joined team ${team.name} for ${eventData.name}.`,
+      link: `/teams/${jr.teamId}`,
+      read: false,
+      createdAt: now,
+    });
+
+    // Update matching orphan listing if exists
+    const orphanSnap = await adminDb
+      .collection("orphanListings")
+      .where("userId", "==", jr.userId)
+      .where("status", "==", "ACTIVE")
+      .where("targetEventId", "==", team.eventId)
+      .get();
+    orphanSnap.docs.forEach((d) => batch.update(d.ref, { status: "MATCHED", updatedAt: now }));
+
+    await batch.commit();
 
     return NextResponse.json({ success: true, status: "ACCEPTED" });
   } catch (error: any) {

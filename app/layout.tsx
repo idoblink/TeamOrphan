@@ -22,11 +22,11 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "TeamOrphan — Find Your Missing Teammate",
+  title: "TeamSync – Event-Based Team Formation and Matching System",
   description:
     "Find teammates for hackathons, competitions, sports and events before your deadline. Strict 24-hour recruitment cutoff rule.",
   openGraph: {
-    title: "TeamOrphan — Find Your Missing Teammate",
+    title: "TeamSync – Event-Based Team Formation and Matching System",
     description: "Don't let your team compete one member short. Match before the 24-hour cutoff.",
     type: "website",
   },
@@ -55,10 +55,10 @@ export default async function RootLayout({
               {/* Brand & Manifesto */}
               <div className="md:col-span-2 space-y-4">
                 <div className="inline-block border-3 border-white bg-brutal-yellow px-3 py-1 text-xl font-black tracking-tighter text-black shadow-[4px_4px_0px_#fff]">
-                  TEAM<span className="bg-black text-white px-1.5 ml-1">ORPHAN</span>
+                  TEAM<span className="bg-black text-white px-1.5 ml-1">SYNC</span>
                 </div>
                 <p className="text-sm font-medium text-neutral-300 max-w-md">
-                  &ldquo;Don&apos;t let your team compete one member short.&rdquo; The last-minute teammate matching platform built for students, hackers, athletes, and builders.
+                  &ldquo;Don&apos;t let your team compete one member short.&rdquo; The event-based team formation and matching platform built for students, hackers, athletes, and builders.
                 </p>
                 <div className="flex items-center gap-2 text-xs font-bold text-brutal-yellow">
                   <ShieldAlert className="w-4 h-4" />
@@ -127,7 +127,7 @@ export default async function RootLayout({
             </div>
 
             <div className="border-t-2 border-neutral-800 pt-6 flex flex-wrap items-center justify-between gap-4 text-xs font-bold text-neutral-400">
-              <p>© {new Date().getFullYear()} TeamOrphan. Built with Neo-Brutalist precision.</p>
+              <p>© {new Date().getFullYear()} TeamSync. Event-Based Team Formation and Matching System.</p>
               <p className="flex items-center gap-1">
                 Zero incomplete teams left behind.
               </p>

@@ -192,7 +192,7 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
         {/* CTA Join Actions */}
         <div className="border-t-3 border-black pt-4 flex flex-wrap items-center justify-between gap-4">
           <div className="text-xs font-bold text-neutral-600">
-            Contact: {team.contactInfo || "Via TeamOrphan Messages"}
+            Contact: {team.contactInfo || "Via TeamSync Messages"}
           </div>
 
           <div>

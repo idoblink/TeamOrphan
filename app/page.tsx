@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { TeamCard } from "@/components/cards/TeamCard";
@@ -25,51 +25,93 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  // Fetch real counts from database
-  const [totalMemberships, totalActiveTeams, totalEvents] = await Promise.all([
-    db.teamMember.count(),
-    db.team.count({ where: { status: "OPEN" } }),
-    db.event.count(),
+  // Fetch real counts from Firestore
+  const [membershipsSnap, openTeamsSnap, eventsSnap] = await Promise.all([
+    adminDb.collection("teamMembers").get(),
+    adminDb.collection("teams").where("status", "==", "OPEN").get(),
+    adminDb.collection("events").get(),
   ]);
 
-  // Fetch active urgent and open teams
-  const activeTeams = await db.team.findMany({
-    where: { status: "OPEN" },
-    include: {
-      event: true,
-      creator: { select: { id: true, name: true, username: true, avatar: true } },
-      members: {
-        include: { user: { select: { name: true, avatar: true } } },
-      },
-      _count: { select: { members: true } },
-    },
-    take: 6,
-    orderBy: { createdAt: "desc" },
-  });
+  const totalMemberships = membershipsSnap.size;
+  const totalActiveTeams = openTeamsSnap.size;
+  const totalEvents = eventsSnap.size;
+
+  // Fetch active teams
+  const activeTeamsRaw = openTeamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  const activeTeams = (
+    await Promise.all(
+      activeTeamsRaw.slice(0, 6).map(async (t) => {
+        const eDoc = await adminDb.collection("events").doc(t.eventId).get();
+        const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+
+        const cDoc = await adminDb.collection("users").doc(t.creatorId).get();
+        const creator = cDoc.exists
+          ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar }
+          : null;
+
+        const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
+        const members = await Promise.all(
+          membersSnap.docs.map(async (m) => {
+            const md = m.data();
+            const uDoc = await adminDb.collection("users").doc(md.userId).get();
+            return {
+              id: m.id,
+              ...md,
+              user: uDoc.exists ? { name: uDoc.data()!.name, avatar: uDoc.data()!.avatar } : null,
+            };
+          })
+        );
+
+        return {
+          ...t,
+          event,
+          creator,
+          members,
+          _count: { members: membersSnap.size },
+        };
+      })
+    )
+  ).filter((t) => t.event !== null);
 
   // Featured urgent team for hero poster
   const featuredTeam = activeTeams[0] || null;
   const featuredSkills = featuredTeam ? parseJsonArray(featuredTeam.requiredSkills) : [];
 
   // Fetch active orphans looking for teams
-  const activeOrphans = await db.orphanListing.findMany({
-    where: { status: "ACTIVE" },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          username: true,
-          avatar: true,
-          college: true,
-          location: true,
-        },
-      },
-      targetEvent: true,
-    },
-    take: 3,
-    orderBy: { createdAt: "desc" },
-  });
+  const orphansSnap = await adminDb
+    .collection("orphanListings")
+    .where("status", "==", "ACTIVE")
+    .limit(3)
+    .get();
+
+  const activeOrphans = await Promise.all(
+    orphansSnap.docs.map(async (o) => {
+      const od = { id: o.id, ...o.data() } as any;
+      const uDoc = await adminDb.collection("users").doc(od.userId).get();
+      const user = uDoc.exists
+        ? {
+            id: uDoc.id,
+            name: uDoc.data()!.name,
+            username: uDoc.data()!.username,
+            avatar: uDoc.data()!.avatar,
+            college: uDoc.data()!.college,
+            location: uDoc.data()!.location,
+          }
+        : null;
+
+      let targetEvent = null;
+      if (od.targetEventId) {
+        const eDoc = await adminDb.collection("events").doc(od.targetEventId).get();
+        if (eDoc.exists) targetEvent = { id: eDoc.id, ...eDoc.data() };
+      }
+
+      return {
+        ...od,
+        user,
+        targetEvent,
+      };
+    })
+  );
 
   const categories = [
     { name: "Hackathons", icon: Code, color: "bg-brutal-yellow" },
@@ -91,7 +133,7 @@ export default async function HomePage() {
               {/* Urgent Floating Pill */}
               <div className="inline-flex items-center gap-2 border-3 border-black bg-brutal-yellow px-3.5 py-1.5 font-heading text-xs font-black uppercase tracking-wider shadow-brutal-sm">
                 <Flame className="w-4 h-4 text-black animate-bounce fill-current" />
-                <span>Last-Minute Teammate Matching Platform</span>
+                <span>Event-Based Team Formation & Matching</span>
               </div>
 
               {/* Huge Neo-Brutalist Title */}
@@ -113,293 +155,223 @@ export default async function HomePage() {
                 Don&apos;t let your team compete one member short. Match with verified students and builders before the strict <strong className="bg-black text-white px-1">24-hour cutoff</strong>.
               </p>
 
-              {/* Large Neo-Brutalist Action Buttons */}
-              <div className="flex flex-wrap gap-4 pt-2">
-                <Link href="/discover?tab=teams">
-                  <BrutalButton variant="yellow" size="xl" className="shadow-brutal-lg">
-                    🔍 FIND A TEAM
+              {/* CTA Row */}
+              <div className="flex flex-wrap items-center gap-4 pt-2">
+                <Link href="/discover">
+                  <BrutalButton variant="yellow" size="lg">
+                    <span>FIND TEAMMATES NOW</span>
+                    <ArrowRight className="w-5 h-5 ml-1 inline" />
                   </BrutalButton>
                 </Link>
-                <Link href="/discover?tab=orphans">
-                  <BrutalButton variant="cyan" size="xl" className="shadow-brutal-lg">
-                    ⚡ FIND A MEMBER
-                  </BrutalButton>
-                </Link>
-                <Link href="/create/team" className="w-full sm:w-auto">
-                  <BrutalButton variant="white" size="xl" className="w-full shadow-brutal-lg">
-                    + POST NEED
+                <Link href="/create/team">
+                  <BrutalButton variant="white" size="lg">
+                    <span>+ POST YOUR SQUAD</span>
                   </BrutalButton>
                 </Link>
               </div>
 
-              {/* Trust Badges */}
-              <div className="flex flex-wrap items-center gap-4 pt-4 text-xs font-black uppercase tracking-wider text-neutral-700">
-                <div className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-green-600 stroke-[3]" />
-                  <span>24H Cutoff Enforced</span>
+              {/* Micro Trust Proof */}
+              <div className="flex flex-wrap items-center gap-6 pt-4 text-xs font-bold text-neutral-700">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-black stroke-[2.5]" />
+                  <span>Verified Cutoff Protection</span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-green-600 stroke-[3]" />
-                  <span>Smart Match Engine</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-green-600 stroke-[3]" />
-                  <span>100% Free for Students</span>
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-black stroke-[2.5]" />
+                  <span>24-Hour Recruitment Freeze</span>
                 </div>
               </div>
             </div>
 
-            {/* Right Hero Graphic / Urgency Poster */}
-            <div className="lg:col-span-5 relative">
-              {featuredTeam ? (
-                <div className="border-4 border-black bg-white p-6 shadow-brutal-xl rotate-1 hover:rotate-0 transition-transform">
-                  <div className="border-b-3 border-black pb-3 mb-4 flex items-center justify-between">
-                    <span className="font-heading text-xs font-black uppercase tracking-widest bg-brutal-pink text-white px-2 py-0.5 border-2 border-black">
-                      🔥 RECRUITING NOW
+            {/* Right Hero Poster (Urgent Spot Card) */}
+            <div className="lg:col-span-5">
+              <div className="relative">
+                {/* Decorative Background Offset Box */}
+                <div className="absolute -inset-3 bg-black transform rotate-1 hidden sm:block"></div>
+
+                <div className="relative border-4 border-black bg-white p-6 sm:p-8 shadow-brutal-xl space-y-6">
+                  {/* Badge Row */}
+                  <div className="flex items-center justify-between">
+                    <span className="border-2 border-black bg-brutal-pink text-white font-heading px-3 py-1 text-xs font-black uppercase tracking-wider animate-pulse shadow-[2px_2px_0px_#000]">
+                      🔥 LIVE RECRUITMENT
                     </span>
-                    <span className="text-xs font-black uppercase text-neutral-500">
-                      LIVE OPPORTUNITY
+                    <span className="text-xs font-black uppercase text-neutral-600">
+                      SPOT 3 OF 4 NEEDED
                     </span>
                   </div>
 
-                  <div className="space-y-4">
-                    <div>
-                      <span className="border-2 border-black bg-brutal-yellow px-2 py-0.5 text-[11px] font-black uppercase">
-                        {featuredTeam.event.name}
-                      </span>
-                      <h3 className="font-heading text-2xl font-black uppercase text-black mt-1">
-                        {featuredTeam.name}
-                      </h3>
+                  {/* Event Title Mockup */}
+                  <div className="space-y-1">
+                    <div className="text-xs font-black uppercase tracking-wider text-neutral-500">
+                      {featuredTeam?.event?.category || "National Hackathon"}
                     </div>
+                    <h3 className="font-heading text-2xl sm:text-3xl font-black uppercase text-black leading-tight">
+                      {featuredTeam?.name || "Neural Ninjas Squad"}
+                    </h3>
+                    <p className="text-xs font-medium text-neutral-700 line-clamp-2">
+                      {featuredTeam?.description ||
+                        "Building an AI legal doc analyzer. Frontend and backend locked, urgently seeking ML / Python engineer before cutoff!"}
+                    </p>
+                  </div>
 
-                    <div className="border-3 border-black bg-yellow-50 p-3 shadow-[3px_3px_0px_#000] flex items-center justify-between">
-                      <div>
-                        <div className="text-[11px] font-black uppercase text-neutral-600">
-                          ROSTER STATUS
-                        </div>
-                        <div className="font-heading text-base font-black text-black">
-                          {featuredTeam.members.length} / {featuredTeam.maxMembers} MEMBERS
-                        </div>
-                      </div>
-                      <span className="border-2 border-black bg-brutal-pink text-white px-2.5 py-1 text-xs font-black uppercase">
-                        NEED {Math.max(0, featuredTeam.maxMembers - featuredTeam.members.length)} MORE
-                      </span>
-                    </div>
-
+                  {/* Urgent Countdown */}
+                  {featuredTeam?.event?.startDate && (
                     <div className="space-y-1">
-                      <div className="text-xs font-black uppercase text-neutral-600">
-                        MISSING ROLE / SKILLS:
+                      <div className="text-[10px] font-black uppercase tracking-wider text-black">
+                        Time Remaining Until Freeze:
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {featuredSkills.slice(0, 3).map((skill: string, idx: number) => (
-                          <span
-                            key={idx}
-                            className="border-2 border-black bg-white px-2 py-1 text-xs font-black uppercase shadow-[2px_2px_0px_#000]"
-                          >
-                            {skill}
-                          </span>
-                        ))}
-                      </div>
+                      <Countdown startDate={featuredTeam.event.startDate} variant="card" />
                     </div>
+                  )}
 
-                    <div className="border-t-2 border-black pt-3 flex items-center justify-between">
-                      <Countdown startDate={featuredTeam.event.startDate} variant="badge" />
-                      <Link href={`/teams/${featuredTeam.id}`}>
-                        <button className="border-2 border-black bg-brutal-yellow px-3 py-1 text-xs font-black uppercase shadow-[2px_2px_0px_#000] hover:bg-black hover:text-white transition-colors">
-                          VIEW TEAM →
-                        </button>
-                      </Link>
+                  {/* Missing Skills Tags */}
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-black uppercase tracking-wider text-neutral-600">
+                      Required Stack to Qualify:
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(featuredSkills.length > 0
+                        ? featuredSkills
+                        : ["Python", "FastAPI", "PyTorch", "React"]
+                      ).map((skill: string, i: number) => (
+                        <span
+                          key={i}
+                          className="border-2 border-black bg-brutal-yellow px-2 py-0.5 text-xs font-black uppercase shadow-[2px_2px_0px_#000]"
+                        >
+                          {skill}
+                        </span>
+                      ))}
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="border-4 border-black bg-white p-8 shadow-brutal-xl text-center space-y-4">
-                  <div className="mx-auto flex h-16 w-16 items-center justify-center border-3 border-black bg-brutal-yellow shadow-brutal">
-                    <PlusCircle className="w-8 h-8 text-black stroke-[2.5]" />
-                  </div>
-                  <h3 className="font-heading text-2xl font-black uppercase text-black">
-                    BE THE FIRST SQUAD
-                  </h3>
-                  <p className="text-xs font-bold text-neutral-600">
-                    Post your event requirement and find missing members before the 24-hour cutoff window.
-                  </p>
-                  <Link href="/create/team" className="block pt-2">
-                    <BrutalButton variant="yellow" size="md" className="w-full">
-                      + Post Team Need Now
-                    </BrutalButton>
-                  </Link>
-                </div>
-              )}
 
-              {/* Sticker Decor */}
-              <div className="absolute -bottom-5 -left-5 border-3 border-black bg-brutal-green p-3 font-heading text-xs font-black uppercase shadow-brutal -rotate-6 hidden sm:block">
-                ⚡ LIVE PROTOCOL ACTIVE
+                  {/* Apply Action */}
+                  <div className="pt-2">
+                    <Link href={featuredTeam ? `/teams/${featuredTeam.id}` : "/discover"}>
+                      <button className="w-full border-3 border-black bg-black py-3 text-center font-heading text-sm font-black uppercase tracking-wider text-white shadow-brutal hover:bg-neutral-800 transition-colors">
+                        APPLY FOR THIS SPOT →
+                      </button>
+                    </Link>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 2. STATS BANNER (DYNAMIC FROM DB) */}
-      <section className="border-y-4 border-black bg-brutal-yellow py-8 px-4 sm:px-6">
+      {/* 2. LIVE METRICS COUNTER BAR */}
+      <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-7xl">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center">
-            <div className="border-3 border-black bg-white p-4 shadow-brutal">
-              <div className="font-heading text-4xl sm:text-5xl font-black text-black">
-                {totalMemberships}
-              </div>
-              <div className="font-heading text-xs font-black uppercase tracking-widest text-neutral-600 mt-1">
-                TEAMMATES JOINED
-              </div>
-            </div>
-
-            <div className="border-3 border-black bg-white p-4 shadow-brutal">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="border-4 border-black bg-brutal-yellow p-6 shadow-brutal">
               <div className="font-heading text-4xl sm:text-5xl font-black text-black">
                 {totalActiveTeams}
               </div>
-              <div className="font-heading text-xs font-black uppercase tracking-widest text-neutral-600 mt-1">
-                ACTIVE RECRUITING SQUADS
+              <div className="font-heading text-xs font-black uppercase tracking-wider text-black mt-1">
+                Active Open Squads
               </div>
             </div>
 
-            <div className="border-3 border-black bg-white p-4 shadow-brutal">
+            <div className="border-4 border-black bg-brutal-cyan p-6 shadow-brutal">
+              <div className="font-heading text-4xl sm:text-5xl font-black text-black">
+                {totalMemberships}
+              </div>
+              <div className="font-heading text-xs font-black uppercase tracking-wider text-black mt-1">
+                Teammates Placed
+              </div>
+            </div>
+
+            <div className="border-4 border-black bg-brutal-pink p-6 shadow-brutal text-white">
+              <div className="font-heading text-4xl sm:text-5xl font-black">24H</div>
+              <div className="font-heading text-xs font-black uppercase tracking-wider mt-1">
+                Cutoff Rule Enforced
+              </div>
+            </div>
+
+            <div className="border-4 border-black bg-brutal-green p-6 shadow-brutal">
               <div className="font-heading text-4xl sm:text-5xl font-black text-black">
                 {totalEvents}
               </div>
-              <div className="font-heading text-xs font-black uppercase tracking-widest text-neutral-600 mt-1">
-                UPCOMING EVENTS & HACKATHONS
+              <div className="font-heading text-xs font-black uppercase tracking-wider text-black mt-1">
+                Events Active
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 3. HOW IT WORKS */}
+      {/* 3. BROWSE BY EVENT DOMAIN CATEGORIES */}
       <section className="px-4 sm:px-6">
-        <div className="mx-auto max-w-7xl space-y-10">
-          <div className="text-center space-y-2">
-            <span className="border-2 border-black bg-brutal-cyan px-3 py-1 font-heading text-xs font-black uppercase tracking-widest shadow-brutal-sm">
-              SIMPLE 3-STEP PIPELINE
-            </span>
-            <h2 className="font-heading text-3xl sm:text-5xl font-black uppercase tracking-tight text-black">
-              HOW TEAMORPHAN WORKS
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Step 1 */}
-            <BrutalCard variant="white" shadowSize="lg" className="space-y-4">
-              <div className="flex items-center justify-between border-b-3 border-black pb-3">
-                <span className="font-heading text-4xl font-black text-brutal-pink">01</span>
-                <span className="border-2 border-black bg-yellow-100 px-2 py-0.5 text-xs font-black uppercase">
-                  CREATE NEED
-                </span>
-              </div>
-              <h3 className="font-heading text-2xl font-black uppercase text-black">
-                POST YOUR SPOT
-              </h3>
-              <p className="text-sm font-medium text-neutral-700">
-                Tell us your event, how many teammates you need (e.g. 3/4), and the specific skills (Python, React, Figma, Arduino) required.
-              </p>
-            </BrutalCard>
-
-            {/* Step 2 */}
-            <BrutalCard variant="white" shadowSize="lg" className="space-y-4">
-              <div className="flex items-center justify-between border-b-3 border-black pb-3">
-                <span className="font-heading text-4xl font-black text-brutal-cyan">02</span>
-                <span className="border-2 border-black bg-cyan-100 px-2 py-0.5 text-xs font-black uppercase">
-                  MATCH & DISCOVER
-                </span>
-              </div>
-              <h3 className="font-heading text-2xl font-black uppercase text-black">
-                SMART COMPATIBILITY
-              </h3>
-              <p className="text-sm font-medium text-neutral-700">
-                Our algorithm calculates instant compatibility scores across skills (40%), event category (20%), location (15%), and availability.
-              </p>
-            </BrutalCard>
-
-            {/* Step 3 */}
-            <BrutalCard variant="white" shadowSize="lg" className="space-y-4">
-              <div className="flex items-center justify-between border-b-3 border-black pb-3">
-                <span className="font-heading text-4xl font-black text-brutal-green">03</span>
-                <span className="border-2 border-black bg-lime-100 px-2 py-0.5 text-xs font-black uppercase">
-                  TEAM UP
-                </span>
-              </div>
-              <h3 className="font-heading text-2xl font-black uppercase text-black">
-                LOCK YOUR SQUAD
-              </h3>
-              <p className="text-sm font-medium text-neutral-700">
-                Send/accept join requests with 1-click. Squads lock in before the 24-hour cutoff so you are 100% prepared to win.
-              </p>
-            </BrutalCard>
-          </div>
-        </div>
-      </section>
-
-      {/* 4. THE 24-HOUR URGENCY BANNER */}
-      <section className="px-4 sm:px-6">
-        <div className="mx-auto max-w-7xl">
-          <div className="border-4 border-black bg-brutal-pink p-8 sm:p-12 text-white shadow-brutal-xl relative overflow-hidden">
-            <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-              <div className="lg:col-span-8 space-y-4">
-                <div className="inline-flex items-center gap-2 border-2 border-black bg-black px-3 py-1 font-heading text-xs font-black uppercase text-white shadow-[3px_3px_0px_#fff]">
-                  <Clock className="w-4 h-4 text-brutal-yellow animate-spin" />
-                  <span>THE ZERO-HOUR PROTOCOL</span>
-                </div>
-                <h2 className="font-heading text-4xl sm:text-6xl font-black uppercase tracking-tight leading-none">
-                  24 HOURS. <br />
-                  THAT&apos;S YOUR WINDOW.
-                </h2>
-                <p className="text-base sm:text-lg font-bold text-white/95 max-w-2xl">
-                  When an event is less than 24 hours away, recruitment automatically freezes on server and client. No last-second scrambling on stage — match your squad now.
-                </p>
-              </div>
-
-              <div className="lg:col-span-4 flex justify-center lg:justify-end">
-                <Link href="/discover?tab=teams">
-                  <BrutalButton variant="yellow" size="xl" className="shadow-brutal-lg">
-                    BROWSE ACTIVE TEAMS →
-                  </BrutalButton>
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 5. ACTIVE TEAM OPENINGS */}
-      <section className="px-4 sm:px-6">
-        <div className="mx-auto max-w-7xl space-y-8">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="mx-auto max-w-7xl space-y-6">
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b-4 border-black pb-4">
             <div>
-              <span className="border-2 border-black bg-brutal-green px-2.5 py-1 font-heading text-xs font-black uppercase tracking-wider">
-                LIVE MARKETPLACE
+              <span className="font-heading text-xs font-black uppercase tracking-widest text-neutral-600">
+                DISCOVER OPPORTUNITIES
               </span>
-              <h2 className="font-heading text-3xl sm:text-4xl font-black uppercase tracking-tight text-black mt-1">
-                TEAMS LOOKING FOR MEMBERS
+              <h2 className="font-heading text-3xl sm:text-4xl font-black uppercase text-black">
+                EXPLORE EVENT CATEGORIES
               </h2>
             </div>
-            <Link href="/discover?tab=teams">
+            <Link href="/events" className="font-heading text-xs font-black uppercase hover:underline">
+              All Events Directory →
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            {categories.map((c, i) => {
+              const Icon = c.icon;
+              return (
+                <Link
+                  key={i}
+                  href={`/discover?category=${encodeURIComponent(c.name)}`}
+                  className="group block"
+                >
+                  <div
+                    className={`border-3 border-black ${c.color} p-4 text-center shadow-brutal transition-transform hover:-translate-x-1 hover:-translate-y-1 hover:shadow-brutal-lg active:translate-x-0 active:translate-y-0`}
+                  >
+                    <Icon className="w-8 h-8 mx-auto text-black stroke-[2.5] mb-2" />
+                    <div className="font-heading text-xs font-black uppercase text-black tracking-tight leading-snug">
+                      {c.name}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* 4. ACTIVE SQUADS RECRUITING NOW */}
+      <section className="px-4 sm:px-6">
+        <div className="mx-auto max-w-7xl space-y-8">
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b-4 border-black pb-4">
+            <div>
+              <span className="font-heading text-xs font-black uppercase tracking-widest text-brutal-pink">
+                URGENT VACANCIES
+              </span>
+              <h2 className="font-heading text-3xl sm:text-4xl font-black uppercase text-black">
+                SQUADS SEEKING PLAYERS
+              </h2>
+            </div>
+            <Link href="/teams">
               <BrutalButton variant="white" size="sm">
-                VIEW ALL TEAMS ({activeTeams.length}) →
+                View All Squads ({totalActiveTeams})
               </BrutalButton>
             </Link>
           </div>
 
           {activeTeams.length === 0 ? (
-            <BrutalCard variant="muted" shadowSize="sm" className="py-12 text-center space-y-3">
-              <Users className="w-10 h-10 mx-auto text-neutral-500 stroke-[2.5]" />
-              <h3 className="font-heading text-lg font-black uppercase text-black">
-                NO TEAMS CURRENTLY RECRUITING
+            <BrutalCard variant="muted" shadowSize="md" className="py-12 text-center space-y-3">
+              <Users className="w-12 h-12 mx-auto text-black stroke-[2.5]" />
+              <h3 className="font-heading text-xl font-black uppercase text-black">
+                NO TEAMS RECRUITING RIGHT NOW
               </h3>
-              <p className="text-xs font-bold text-neutral-600">
-                Be the first to post a team requirement.
+              <p className="text-xs font-bold text-neutral-600 max-w-sm mx-auto">
+                Be the first to post a team opening and lock in your teammates!
               </p>
               <Link href="/create/team" className="inline-block pt-2">
                 <BrutalButton variant="yellow" size="sm">
-                  + Create Team Need
+                  + Create Team Listing
                 </BrutalButton>
               </Link>
             </BrutalCard>
@@ -413,103 +385,146 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* 6. ORPHANS LOOKING FOR A TEAM */}
+      {/* 5. 24-HOUR PROTOCOL EXPLAINER BANNER */}
+      <section className="px-4 sm:px-6">
+        <div className="mx-auto max-w-7xl">
+          <div className="border-4 border-black bg-black text-white p-8 sm:p-12 shadow-brutal-xl">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              <div className="lg:col-span-8 space-y-4">
+                <span className="inline-block border-2 border-brutal-yellow bg-brutal-yellow text-black font-heading text-xs font-black uppercase px-2.5 py-0.5">
+                  THE RULE OF LAW
+                </span>
+                <h2 className="font-heading text-3xl sm:text-5xl font-black uppercase tracking-tight text-white leading-tight">
+                  THE 24-HOUR RECRUITMENT FREEZE PROTOCOL
+                </h2>
+                <p className="text-neutral-300 font-medium text-sm sm:text-base max-w-2xl">
+                  Every event locks recruitment exactly <strong className="text-brutal-yellow">24 hours</strong> before kickoff. Once the clock runs out, server-side transactions reject join requests automatically.
+                </p>
+              </div>
+
+              <div className="lg:col-span-4 border-3 border-white bg-neutral-900 p-6 space-y-3">
+                <div className="flex items-center gap-2 text-brutal-yellow font-heading text-sm font-black uppercase">
+                  <Zap className="w-4 h-4 fill-current" />
+                  <span>How It Enforces:</span>
+                </div>
+                <ul className="text-xs font-bold text-neutral-300 space-y-2">
+                  <li className="flex items-start gap-2">
+                    <span className="text-brutal-green font-black">✓</span>
+                    Server rejects join requests post-cutoff
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-brutal-green font-black">✓</span>
+                    Urgency countdown pulses at &lt;24 hours
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-brutal-green font-black">✓</span>
+                    Listing automatically closes at full roster
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 6. INDIVIDUALS LOOKING FOR SQUADS */}
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-7xl space-y-8">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b-4 border-black pb-4">
             <div>
-              <span className="border-2 border-black bg-brutal-cyan px-2.5 py-1 font-heading text-xs font-black uppercase tracking-wider">
-                AVAILABLE TALENT
+              <span className="font-heading text-xs font-black uppercase tracking-widest text-brutal-green">
+                TALENT BENCH
               </span>
-              <h2 className="font-heading text-3xl sm:text-4xl font-black uppercase tracking-tight text-black mt-1">
-                PEOPLE LOOKING FOR A TEAM
+              <h2 className="font-heading text-3xl sm:text-4xl font-black uppercase text-black">
+                FREE AGENTS READY TO COMPETE
               </h2>
             </div>
             <Link href="/discover?tab=orphans">
               <BrutalButton variant="white" size="sm">
-                VIEW ALL ORPHANS →
+                Browse All Builders →
               </BrutalButton>
             </Link>
           </div>
 
-          {activeOrphans.length === 0 ? (
-            <BrutalCard variant="muted" shadowSize="sm" className="py-12 text-center space-y-3">
-              <Users className="w-10 h-10 mx-auto text-neutral-500 stroke-[2.5]" />
-              <h3 className="font-heading text-lg font-black uppercase text-black">
-                NO ORPHAN PROFILES YET
-              </h3>
-              <p className="text-xs font-bold text-neutral-600">
-                Post your availability so recruiters can invite you directly.
-              </p>
-              <Link href="/create/orphan" className="inline-block pt-2">
-                <BrutalButton variant="green" size="sm">
-                  + Post Availability
-                </BrutalButton>
-              </Link>
-            </BrutalCard>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {activeOrphans.map((orphan) => (
-                <OrphanCard key={orphan.id} listing={orphan as any} />
-              ))}
-            </div>
-          )}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {activeOrphans.map((orphan) => (
+              <OrphanCard key={orphan.id} listing={orphan as any} />
+            ))}
+          </div>
         </div>
       </section>
 
-      {/* 7. POPULAR CATEGORIES */}
+      {/* 7. HOW IT WORKS 3-STEP SECTION */}
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-7xl space-y-8">
           <div className="text-center space-y-2">
-            <span className="border-2 border-black bg-white px-3 py-1 font-heading text-xs font-black uppercase tracking-widest shadow-brutal-sm">
-              EXPLORE BY DOMAIN
+            <span className="font-heading text-xs font-black uppercase tracking-widest text-neutral-600">
+              SIMPLE 3-STEP SYSTEM
             </span>
-            <h2 className="font-heading text-3xl sm:text-4xl font-black uppercase tracking-tight text-black">
-              POPULAR EVENT CATEGORIES
+            <h2 className="font-heading text-3xl sm:text-5xl font-black uppercase text-black">
+              HOW TEAMSYNC WORKS
             </h2>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            {categories.map((cat, idx) => {
-              const IconComp = cat.icon;
-              return (
-                <Link
-                  key={idx}
-                  href={`/discover?category=${encodeURIComponent(cat.name)}`}
-                  className={`border-3 border-black p-4 flex flex-col items-center justify-center text-center gap-2 shadow-brutal hover:-translate-y-1 hover:shadow-brutal-lg transition-transform ${cat.color}`}
-                >
-                  <div className="border-2 border-black bg-white p-2 shadow-brutal-sm">
-                    <IconComp className="w-6 h-6 text-black stroke-[2.5]" />
-                  </div>
-                  <div className="font-heading text-xs font-black uppercase text-black">
-                    {cat.name}
-                  </div>
-                </Link>
-              );
-            })}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="border-4 border-black bg-white p-6 shadow-brutal space-y-4">
+              <div className="border-3 border-black bg-brutal-yellow w-12 h-12 flex items-center justify-center font-heading text-2xl font-black text-black shadow-brutal-sm">
+                01
+              </div>
+              <h3 className="font-heading text-xl font-black uppercase text-black">
+                POST OR BROWSE OPENINGS
+              </h3>
+              <p className="text-xs font-medium text-neutral-700">
+                Squads list exact skill requirements. Free agents post skill profiles and availability.
+              </p>
+            </div>
+
+            <div className="border-4 border-black bg-white p-6 shadow-brutal space-y-4">
+              <div className="border-3 border-black bg-brutal-pink w-12 h-12 flex items-center justify-center font-heading text-2xl font-black text-white shadow-brutal-sm">
+                02
+              </div>
+              <h3 className="font-heading text-xl font-black uppercase text-black">
+                COMPATIBILITY MATCHING
+              </h3>
+              <p className="text-xs font-medium text-neutral-700">
+                Our engine scores candidates from 0 to 100% based on skills, domain, mode, and availability.
+              </p>
+            </div>
+
+            <div className="border-4 border-black bg-white p-6 shadow-brutal space-y-4">
+              <div className="border-3 border-black bg-brutal-green w-12 h-12 flex items-center justify-center font-heading text-2xl font-black text-black shadow-brutal-sm">
+                03
+              </div>
+              <h3 className="font-heading text-xl font-black uppercase text-black">
+                ACCEPT & LOCK ROSTER
+              </h3>
+              <p className="text-xs font-medium text-neutral-700">
+                Accept members with one click before the 24-hour freeze window closes. Go win together.
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* 8. FINAL CALL TO ACTION */}
+      {/* 8. BOTTOM CALL TO ACTION */}
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-7xl">
-          <div className="border-4 border-black bg-brutal-yellow p-8 sm:p-14 text-center shadow-brutal-xl space-y-6">
-            <h2 className="font-heading text-4xl sm:text-6xl font-black uppercase tracking-tight text-black leading-none">
-              STILL MISSING <br />
-              A TEAMMATE?
+          <div className="border-4 border-black bg-brutal-yellow p-8 sm:p-14 text-center space-y-6 shadow-brutal-xl">
+            <h2 className="font-heading text-3xl sm:text-6xl font-black uppercase tracking-tight text-black max-w-2xl mx-auto leading-tight">
+              NEVER COMPETE DOWN A MEMBER AGAIN.
             </h2>
-            <p className="font-heading text-xl sm:text-2xl font-black uppercase text-black">
-              DON&apos;T PANIC. FIND ONE RIGHT NOW.
+            <p className="text-sm sm:text-base font-bold text-neutral-800 max-w-xl mx-auto">
+              Join thousands of hackathon participants, competitive programmers, and sports builders.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
               <Link href="/register">
-                <BrutalButton variant="black" size="xl" className="shadow-brutal-lg">
-                  ⚡ CREATE FREE ACCOUNT
+                <BrutalButton variant="black" size="lg">
+                  <span>CREATE FREE ACCOUNT</span>
+                  <ArrowRight className="w-5 h-5 ml-1 inline" />
                 </BrutalButton>
               </Link>
               <Link href="/discover">
-                <BrutalButton variant="white" size="xl" className="shadow-brutal-lg">
+                <BrutalButton variant="white" size="lg">
                   EXPLORE MARKETPLACE
                 </BrutalButton>
               </Link>

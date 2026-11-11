@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateCompatibility } from "@/lib/matching";
 
@@ -11,124 +11,134 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const type = searchParams.get("type") || "teams"; // "teams" | "orphans"
+    const type = searchParams.get("type") || "teams";
+
+    const u = user as any;
 
     if (type === "teams") {
-      // Find open teams not created by user and user not in them
-      const teams = await db.team.findMany({
-        where: {
-          creatorId: { not: user.id },
-          status: "OPEN",
-          members: {
-            none: { userId: user.id },
-          },
-        },
-        include: {
-          event: true,
-          creator: {
-            select: { id: true, name: true, username: true, avatar: true },
-          },
-          members: {
-            include: { user: true },
-          },
-        },
-      });
+      const teamsSnap = await adminDb
+        .collection("teams")
+        .where("status", "==", "OPEN")
+        .get();
 
-      const matchedTeams = teams.map((team) => {
-        const matchResult = calculateCompatibility(
-          {
-            skills: user.skills,
-            interests: user.interests,
-            location: user.location,
-          },
-          {
-            requiredSkills: team.requiredSkills,
-            preferredSkills: team.preferredSkills,
-            category: team.event.category,
-            location: team.event.location,
-            mode: team.event.mode,
-          }
-        );
+      const teams = teamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
-        return {
-          team,
-          match: matchResult,
-        };
-      });
+      // Filter out teams created by user or where user is already a member
+      const eligible: any[] = [];
+      for (const team of teams) {
+        if (team.creatorId === user.id) continue;
 
-      // Sort by highest match score
-      matchedTeams.sort((a, b) => b.match.score - a.match.score);
+        const memberSnap = await adminDb
+          .collection("teamMembers")
+          .where("teamId", "==", team.id)
+          .where("userId", "==", user.id)
+          .limit(1)
+          .get();
+        if (!memberSnap.empty) continue;
 
-      return NextResponse.json({ matches: matchedTeams });
-    } else {
-      // Type === "orphans" - for recruiters finding orphans
-      const orphans = await db.orphanListing.findMany({
-        where: {
-          userId: { not: user.id },
-          status: "ACTIVE",
-        },
-        include: {
-          user: true,
-          targetEvent: true,
-        },
-      });
+        // Enrich with event
+        const eventDoc = await adminDb.collection("events").doc(team.eventId).get();
+        const event = eventDoc.exists ? { id: eventDoc.id, ...eventDoc.data() } : null;
 
-      // Get user's created open teams to compare against
-      const userTeams = await db.team.findMany({
-        where: { creatorId: user.id, status: "OPEN" },
-        include: { event: true },
-      });
+        const creatorDoc = await adminDb.collection("users").doc(team.creatorId).get();
+        const creator = creatorDoc.exists
+          ? { id: creatorDoc.id, name: creatorDoc.data()!.name, username: creatorDoc.data()!.username, avatar: creatorDoc.data()!.avatar }
+          : null;
 
-      const matchedOrphans = orphans.map((orphan) => {
-        let bestScore = 0;
-        let bestMatchResult: any = null;
+        const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", team.id).get();
+        const members = membersSnap.docs.map((m) => ({ id: m.id, ...m.data() }));
 
-        if (userTeams.length > 0) {
-          userTeams.forEach((team) => {
-            const res = calculateCompatibility(
-              {
-                skills: orphan.skills,
-                interests: orphan.user.interests,
-                location: orphan.location || orphan.user.location,
-                mode: orphan.mode,
-                availability: orphan.availability,
-                categoryPreference: orphan.targetCategory,
-              },
-              {
-                requiredSkills: team.requiredSkills,
-                preferredSkills: team.preferredSkills,
-                category: team.event.category,
-                location: team.event.location,
-                mode: team.event.mode,
-              }
-            );
-            if (res.score > bestScore) {
-              bestScore = res.score;
-              bestMatchResult = res;
-            }
-          });
-        } else {
-          bestMatchResult = calculateCompatibility(
+        eligible.push({ ...team, event, creator, members });
+      }
+
+      const matchedTeams = eligible
+        .filter((t) => t.event)
+        .map((team) => {
+          const matchResult = calculateCompatibility(
+            { skills: u.skills, interests: u.interests, location: u.location },
             {
-              skills: orphan.skills,
-              interests: orphan.user.interests,
-              location: orphan.location || orphan.user.location,
-            },
-            {
-              requiredSkills: user.skills,
-              category: "Hackathon",
+              requiredSkills: team.requiredSkills,
+              preferredSkills: team.preferredSkills,
+              category: team.event.category,
+              location: team.event.location,
+              mode: team.event.mode,
             }
           );
-        }
+          return { team, match: matchResult };
+        });
 
-        return {
-          orphan,
-          match: bestMatchResult,
-        };
-      });
+      matchedTeams.sort((a, b) => b.match.score - a.match.score);
+      return NextResponse.json({ matches: matchedTeams });
+    } else {
+      // Type = orphans
+      const orphansSnap = await adminDb
+        .collection("orphanListings")
+        .where("status", "==", "ACTIVE")
+        .get();
+
+      const orphans = orphansSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((o: any) => o.userId !== user.id) as any[];
+
+      const userTeamsSnap = await adminDb
+        .collection("teams")
+        .where("creatorId", "==", user.id)
+        .where("status", "==", "OPEN")
+        .get();
+      const userTeams = userTeamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+
+      // Enrich user teams with events
+      const userTeamsEnriched = await Promise.all(
+        userTeams.map(async (t) => {
+          const eDoc = await adminDb.collection("events").doc(t.eventId).get();
+          return { ...t, event: eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null };
+        })
+      );
+
+      const matchedOrphans = await Promise.all(
+        orphans.map(async (orphan) => {
+          const uDoc = await adminDb.collection("users").doc(orphan.userId).get();
+          const orphanUser = uDoc.exists ? { id: uDoc.id, ...uDoc.data() } : null;
+
+          let bestScore = 0;
+          let bestMatchResult: any = null;
+
+          if (userTeamsEnriched.length > 0) {
+            userTeamsEnriched.filter((t) => t.event).forEach((team) => {
+              const res = calculateCompatibility(
+                {
+                  skills: orphan.skills,
+                  interests: orphanUser ? (orphanUser as any).interests : "[]",
+                  location: orphan.location || (orphanUser as any)?.location,
+                  mode: orphan.mode,
+                  availability: orphan.availability,
+                  categoryPreference: orphan.targetCategory,
+                },
+                {
+                  requiredSkills: team.requiredSkills,
+                  preferredSkills: team.preferredSkills,
+                  category: team.event.category,
+                  location: team.event.location,
+                  mode: team.event.mode,
+                }
+              );
+              if (res.score > bestScore) {
+                bestScore = res.score;
+                bestMatchResult = res;
+              }
+            });
+          } else {
+            bestMatchResult = calculateCompatibility(
+              { skills: orphan.skills, interests: orphanUser ? (orphanUser as any).interests : "[]", location: orphan.location },
+              { requiredSkills: u.skills, category: "Hackathon" }
+            );
+          }
+
+          return { orphan: { ...orphan, user: orphanUser }, match: bestMatchResult };
+        })
+      );
 
       matchedOrphans.sort((a, b) => b.match.score - a.match.score);
-
       return NextResponse.json({ matches: matchedOrphans });
     }
   } catch (error: any) {

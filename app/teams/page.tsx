@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { getCurrentUser } from "@/lib/auth";
 import { TeamCard } from "@/components/cards/TeamCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
@@ -25,36 +25,63 @@ export default async function TeamsPage({ searchParams }: TeamsPageProps) {
   const search = searchParams.search || "";
   const urgency = searchParams.urgency || "ALL";
 
-  const whereClause: any = {};
-  if (category !== "ALL") whereClause.event = { ...whereClause.event, category };
-  if (mode !== "ALL") whereClause.event = { ...whereClause.event, mode };
-  if (search) {
-    whereClause.OR = [
-      { name: { contains: search } },
-      { description: { contains: search } },
-      { requiredSkills: { contains: search } },
-      { event: { name: { contains: search } } },
-    ];
-  }
+  const teamsSnap = await adminDb.collection("teams").orderBy("createdAt", "desc").get();
+  let rawTeams = teamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
-  const rawTeams = await db.team.findMany({
-    where: whereClause,
-    include: {
-      event: true,
-      creator: { select: { id: true, name: true, username: true, avatar: true } },
-      members: {
-        include: { user: { select: { name: true, avatar: true } } },
-      },
-      _count: { select: { members: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  // Enrich teams
+  rawTeams = await Promise.all(
+    rawTeams.map(async (t) => {
+      const eDoc = await adminDb.collection("events").doc(t.eventId).get();
+      const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+
+      const cDoc = await adminDb.collection("users").doc(t.creatorId).get();
+      const creator = cDoc.exists
+        ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar }
+        : null;
+
+      const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
+      const members = await Promise.all(
+        membersSnap.docs.map(async (m) => {
+          const md = m.data();
+          const uDoc = await adminDb.collection("users").doc(md.userId).get();
+          return {
+            id: m.id,
+            ...md,
+            user: uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, avatar: uDoc.data()!.avatar } : null,
+          };
+        })
+      );
+
+      return {
+        ...t,
+        event,
+        creator,
+        members,
+        _count: { members: membersSnap.size },
+      };
+    })
+  );
+
+  rawTeams = rawTeams.filter((t) => t.event !== null);
+
+  if (category !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.category === category);
+  if (mode !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.mode === mode);
+  if (search) {
+    const s = search.toLowerCase();
+    rawTeams = rawTeams.filter(
+      (t) =>
+        t.name?.toLowerCase().includes(s) ||
+        t.description?.toLowerCase().includes(s) ||
+        t.requiredSkills?.toLowerCase().includes(s) ||
+        t.event?.name?.toLowerCase().includes(s)
+    );
+  }
 
   let teams = rawTeams;
   if (urgency === "urgent") {
     const now = new Date().getTime();
     teams = rawTeams.filter((t) => {
-      const start = new Date(t.event.startDate).getTime();
+      const start = t.event.startDate?.toDate ? t.event.startDate.toDate().getTime() : new Date(t.event.startDate).getTime();
       const cutoff = start - 24 * 60 * 60 * 1000;
       const remaining = cutoff - now;
       return remaining > 0 && remaining <= 24 * 60 * 60 * 1000;
@@ -65,7 +92,7 @@ export default async function TeamsPage({ searchParams }: TeamsPageProps) {
     let match = null;
     if (user) {
       match = calculateCompatibility(
-        { skills: user.skills, interests: user.interests, location: user.location },
+        { skills: (user as any).skills, interests: (user as any).interests, location: (user as any).location },
         {
           requiredSkills: team.requiredSkills,
           preferredSkills: team.preferredSkills,

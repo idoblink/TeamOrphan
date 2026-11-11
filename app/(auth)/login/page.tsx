@@ -46,7 +46,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
           <div className="inline-block border-3 border-black bg-brutal-yellow px-3 py-1 text-2xl font-black tracking-tight text-black shadow-brutal">
-            TEAMORPHAN
+            TEAMSYNC
           </div>
           <h1 className="font-heading text-3xl font-black uppercase text-black">
             WELCOME BACK

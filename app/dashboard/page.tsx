@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { getCurrentUser } from "@/lib/auth";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
@@ -32,175 +32,153 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const userSkills = parseJsonArray(user.skills);
-  const userInterests = parseJsonArray(user.interests);
+  const u = user as any;
+  const userSkills = parseJsonArray(u.skills);
 
-  // 1. Fetch user's created teams with join requests
-  const myTeams = await db.team.findMany({
-    where: { creatorId: user.id },
-    include: {
-      event: true,
-      members: {
-        include: { user: { select: { id: true, name: true, avatar: true } } },
-      },
-      joinRequests: {
-        where: { status: "PENDING" },
-        include: { user: true },
-      },
-      _count: { select: { members: true, joinRequests: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  // 1. My created teams
+  const myTeamsSnap = await adminDb.collection("teams").where("creatorId", "==", u.id).orderBy("createdAt", "desc").get();
+  const myTeams = await Promise.all(
+    myTeamsSnap.docs.map(async (t) => {
+      const td = { id: t.id, ...t.data() } as any;
+      const eDoc = await adminDb.collection("events").doc(td.eventId).get();
+      const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+      const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
+      const members = await Promise.all(membersSnap.docs.map(async (m) => {
+        const md = m.data();
+        const uDoc = await adminDb.collection("users").doc(md.userId).get();
+        return { id: m.id, ...md, user: uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, avatar: uDoc.data()!.avatar } : null };
+      }));
+      const jrSnap = await adminDb.collection("joinRequests").where("teamId", "==", t.id).where("status", "==", "PENDING").get();
+      const joinRequests = jrSnap.docs.map((jr) => ({ id: jr.id, ...jr.data() }));
+      return { ...td, event, members, joinRequests, _count: { members: membersSnap.size, joinRequests: jrSnap.size } };
+    })
+  );
 
-  // 2. Fetch teams where user is a member (but not leader)
-  const memberTeams = await db.team.findMany({
-    where: {
-      creatorId: { not: user.id },
-      members: { some: { userId: user.id } },
-    },
-    include: {
-      event: true,
-      creator: { select: { name: true, avatar: true } },
-      members: { include: { user: true } },
-      _count: { select: { members: true } },
-    },
-  });
+  // 2. Teams where user is a member (not leader)
+  const membershipSnap = await adminDb.collection("teamMembers").where("userId", "==", u.id).get();
+  const memberTeamIds = membershipSnap.docs.map((d) => d.data().teamId);
+  const rawMemberTeams = await Promise.all(
+    memberTeamIds.map(async (teamId) => {
+      const tDoc = await adminDb.collection("teams").doc(teamId).get();
+      if (!tDoc.exists) return null;
+      const td = { id: tDoc.id, ...tDoc.data() } as any;
+      if (td.creatorId === u.id) return null; // skip own teams
+      const eDoc = await adminDb.collection("events").doc(td.eventId).get();
+      const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+      const cDoc = await adminDb.collection("users").doc(td.creatorId).get();
+      const creator = cDoc.exists ? { id: cDoc.id, name: cDoc.data()!.name, avatar: cDoc.data()!.avatar } : null;
+      const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", teamId).get();
+      const members = membersSnap.docs.map((m) => ({ id: m.id, ...m.data() }));
+      return { ...td, event, creator, members, _count: { members: membersSnap.size } };
+    })
+  );
+  const memberTeams = rawMemberTeams.filter(Boolean);
 
-  // 3. Fetch user's orphan listings
-  const myOrphanListings = await db.orphanListing.findMany({
-    where: { userId: user.id },
-    include: { targetEvent: true },
-    orderBy: { createdAt: "desc" },
-  });
+  // 3. My orphan listings
+  const myOrphanSnap = await adminDb.collection("orphanListings").where("userId", "==", u.id).orderBy("createdAt", "desc").get();
+  const myOrphanListings = await Promise.all(
+    myOrphanSnap.docs.map(async (o) => {
+      const od = { id: o.id, ...o.data() } as any;
+      let targetEvent = null;
+      if (od.targetEventId) {
+        const eDoc = await adminDb.collection("events").doc(od.targetEventId).get();
+        if (eDoc.exists) targetEvent = { id: eDoc.id, ...eDoc.data() };
+      }
+      return { ...od, targetEvent };
+    })
+  );
 
-  // 4. Fetch user's submitted join requests
-  const mySentRequests = await db.joinRequest.findMany({
-    where: { userId: user.id },
-    include: {
-      team: {
-        include: {
-          event: true,
-          creator: { select: { name: true, username: true } },
-        },
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  // 4. My sent join requests
+  const jrSnap = await adminDb.collection("joinRequests").where("userId", "==", u.id).orderBy("createdAt", "desc").get();
+  const rawSentRequests = await Promise.all(
+    jrSnap.docs.map(async (jr) => {
+      const jrd = { id: jr.id, ...jr.data() } as any;
+      const tDoc = await adminDb.collection("teams").doc(jrd.teamId).get();
+      if (!tDoc.exists) return null;
+      const td = tDoc.data()!;
+      const eDoc = await adminDb.collection("events").doc(td.eventId).get();
+      const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+      const cDoc = await adminDb.collection("users").doc(td.creatorId).get();
+      const creator = cDoc.exists ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username } : null;
+      return { ...jrd, team: { id: tDoc.id, ...td, event, creator } };
+    })
+  );
+  const mySentRequests = rawSentRequests.filter(Boolean);
 
-  // 5. Calculate Recommended Teams for this user
-  const openOtherTeams = await db.team.findMany({
-    where: {
-      creatorId: { not: user.id },
-      status: "OPEN",
-      members: { none: { userId: user.id } },
-    },
-    include: {
-      event: true,
-      creator: { select: { id: true, name: true, username: true, avatar: true } },
-      members: { include: { user: true } },
-      _count: { select: { members: true } },
-    },
-    take: 10,
-  });
+  // 5. Recommended teams
+  const openTeamsSnap = await adminDb.collection("teams").where("status", "==", "OPEN").get();
+  const openTeams = await Promise.all(
+    openTeamsSnap.docs.slice(0, 20).map(async (t) => {
+      const td = { id: t.id, ...t.data() } as any;
+      if (td.creatorId === u.id) return null;
+      const memberSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).where("userId", "==", u.id).limit(1).get();
+      if (!memberSnap.empty) return null;
+      const eDoc = await adminDb.collection("events").doc(td.eventId).get();
+      const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+      if (!event) return null;
+      const cDoc = await adminDb.collection("users").doc(td.creatorId).get();
+      const creator = cDoc.exists ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar } : null;
+      const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
+      const members = membersSnap.docs.map((m) => ({ id: m.id, ...m.data() }));
+      return { ...td, event, creator, members, _count: { members: membersSnap.size } };
+    })
+  );
+  const eligibleTeams = openTeams.filter(Boolean) as any[];
 
-  const recommendedTeams = openOtherTeams
+  const recommendedTeams = eligibleTeams
     .map((team) => {
       const match = calculateCompatibility(
-        {
-          skills: user.skills,
-          interests: user.interests,
-          location: user.location,
-        },
-        {
-          requiredSkills: team.requiredSkills,
-          preferredSkills: team.preferredSkills,
-          category: team.event.category,
-          location: team.event.location,
-          mode: team.event.mode,
-        }
+        { skills: u.skills, interests: u.interests, location: u.location },
+        { requiredSkills: team.requiredSkills, preferredSkills: team.preferredSkills, category: team.event.category, location: team.event.location, mode: team.event.mode }
       );
       return { team, match };
     })
     .sort((a, b) => b.match.score - a.match.score)
     .slice(0, 3);
 
-  // 6. Calculate Recommended Members for user's teams
-  const activeOrphans = await db.orphanListing.findMany({
-    where: {
-      userId: { not: user.id },
-      status: "ACTIVE",
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          username: true,
-          avatar: true,
-          college: true,
-          location: true,
-          skills: true,
-          interests: true,
-        },
-      },
-      targetEvent: true,
-    },
-    take: 6,
-  });
+  // 6. Recommended orphans for user's teams
+  const activeOrphansSnap = await adminDb.collection("orphanListings").where("status", "==", "ACTIVE").get();
+  const activeOrphans = await Promise.all(
+    activeOrphansSnap.docs.slice(0, 20).map(async (o) => {
+      const od = { id: o.id, ...o.data() } as any;
+      if (od.userId === u.id) return null;
+      const uDoc = await adminDb.collection("users").doc(od.userId).get();
+      const orphanUser = uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, username: uDoc.data()!.username, avatar: uDoc.data()!.avatar, college: uDoc.data()!.college, location: uDoc.data()!.location, skills: uDoc.data()!.skills, interests: uDoc.data()!.interests } : null;
+      let targetEvent = null;
+      if (od.targetEventId) {
+        const eDoc = await adminDb.collection("events").doc(od.targetEventId).get();
+        if (eDoc.exists) targetEvent = { id: eDoc.id, ...eDoc.data() };
+      }
+      return { ...od, user: orphanUser, targetEvent };
+    })
+  );
+  const filteredOrphans = activeOrphans.filter(Boolean) as any[];
 
-  const recommendedOrphans = activeOrphans
+  const recommendedOrphans = filteredOrphans
     .map((orphan) => {
       let bestMatch: any = null;
       let highestScore = 0;
-
       if (myTeams.length > 0) {
-        myTeams.forEach((team) => {
+        myTeams.forEach((team: any) => {
+          if (!team.event) return;
           const match = calculateCompatibility(
-            {
-              skills: orphan.skills,
-              interests: orphan.user.interests,
-              location: orphan.location || orphan.user.location,
-              mode: orphan.mode,
-              availability: orphan.availability,
-              categoryPreference: orphan.targetCategory,
-            },
-            {
-              requiredSkills: team.requiredSkills,
-              preferredSkills: team.preferredSkills,
-              category: team.event.category,
-              location: team.event.location,
-              mode: team.event.mode,
-            }
+            { skills: orphan.skills, interests: orphan.user?.interests || "[]", location: orphan.location || orphan.user?.location, mode: orphan.mode, availability: orphan.availability, categoryPreference: orphan.targetCategory },
+            { requiredSkills: team.requiredSkills, preferredSkills: team.preferredSkills, category: team.event.category, location: team.event.location, mode: team.event.mode }
           );
-          if (match.score > highestScore) {
-            highestScore = match.score;
-            bestMatch = match;
-          }
+          if (match.score > highestScore) { highestScore = match.score; bestMatch = match; }
         });
       } else {
         bestMatch = calculateCompatibility(
-          {
-            skills: orphan.skills,
-            interests: orphan.user.interests,
-            location: orphan.location,
-          },
-          {
-            requiredSkills: user.skills,
-            category: "Hackathon",
-          }
+          { skills: orphan.skills, interests: orphan.user?.interests || "[]", location: orphan.location },
+          { requiredSkills: u.skills, category: "Hackathon" }
         );
       }
-
       return { orphan, match: bestMatch };
     })
     .sort((a, b) => (b.match?.score || 0) - (a.match?.score || 0))
     .slice(0, 3);
 
-  // Total pending requests on my teams
-  const totalPendingOnMyTeams = myTeams.reduce(
-    (acc, t) => acc + (t.joinRequests ? t.joinRequests.length : 0),
-    0
-  );
+  const totalPendingOnMyTeams = myTeams.reduce((acc: number, t: any) => acc + (t.joinRequests?.length || 0), 0);
 
   return (
     <div className="py-8 px-4 sm:px-6 space-y-10 max-w-7xl mx-auto">

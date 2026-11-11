@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { getCurrentUser } from "@/lib/auth";
+import { FieldValue } from "firebase-admin/firestore";
 
 export async function GET() {
   try {
@@ -9,13 +10,15 @@ export async function GET() {
       return NextResponse.json({ notifications: [], unreadCount: 0 });
     }
 
-    const notifications = await db.notification.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
-      take: 30,
-    });
+    const snap = await adminDb
+      .collection("notifications")
+      .where("userId", "==", user.id)
+      .orderBy("createdAt", "desc")
+      .limit(30)
+      .get();
 
-    const unreadCount = notifications.filter((n) => !n.read).length;
+    const notifications = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const unreadCount = notifications.filter((n: any) => !n.read).length;
 
     return NextResponse.json({ notifications, unreadCount });
   } catch (error: any) {
@@ -32,20 +35,22 @@ export async function PATCH(req: NextRequest) {
     }
 
     const { id, markAllRead } = await req.json();
+    const now = FieldValue.serverTimestamp();
 
     if (markAllRead) {
-      await db.notification.updateMany({
-        where: { userId: user.id, read: false },
-        data: { read: true },
-      });
+      const snap = await adminDb
+        .collection("notifications")
+        .where("userId", "==", user.id)
+        .where("read", "==", false)
+        .get();
+      const batch = adminDb.batch();
+      snap.docs.forEach((d) => batch.update(d.ref, { read: true }));
+      await batch.commit();
       return NextResponse.json({ success: true });
     }
 
     if (id) {
-      await db.notification.update({
-        where: { id },
-        data: { read: true },
-      });
+      await adminDb.collection("notifications").doc(id).update({ read: true });
       return NextResponse.json({ success: true });
     }
 

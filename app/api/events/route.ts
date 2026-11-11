@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { getCurrentUser } from "@/lib/auth";
 import { CreateEventSchema } from "@/lib/validation";
+import { FieldValue } from "firebase-admin/firestore";
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,38 +11,57 @@ export async function GET(req: NextRequest) {
     const mode = searchParams.get("mode");
     const search = searchParams.get("search");
 
-    const whereClause: any = {};
+    let query: FirebaseFirestore.Query = adminDb.collection("events").orderBy("startDate", "asc");
+    const snap = await query.get();
+
+    let events = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
     if (category && category !== "ALL") {
-      whereClause.category = category;
+      events = events.filter((e) => e.category === category);
     }
-
     if (mode && mode !== "ALL") {
-      whereClause.mode = mode;
+      events = events.filter((e) => e.mode === mode);
     }
-
     if (search) {
-      whereClause.OR = [
-        { name: { contains: search } },
-        { description: { contains: search } },
-        { location: { contains: search } },
-      ];
+      const s = search.toLowerCase();
+      events = events.filter(
+        (e) =>
+          e.name?.toLowerCase().includes(s) ||
+          e.description?.toLowerCase().includes(s) ||
+          e.location?.toLowerCase().includes(s)
+      );
     }
 
-    const events = await db.event.findMany({
-      where: whereClause,
-      include: {
-        _count: {
-          select: { teams: true, orphanListings: true },
-        },
-        createdBy: {
-          select: { id: true, name: true, username: true },
-        },
-      },
-      orderBy: { startDate: "asc" },
-    });
+    // Enrich with counts and creator
+    const enriched = await Promise.all(
+      events.map(async (event) => {
+        const teamsSnap = await adminDb
+          .collection("teams")
+          .where("eventId", "==", event.id)
+          .get();
+        const orphansSnap = await adminDb
+          .collection("orphanListings")
+          .where("targetEventId", "==", event.id)
+          .get();
 
-    return NextResponse.json({ events });
+        let createdBy = null;
+        if (event.createdById) {
+          const uDoc = await adminDb.collection("users").doc(event.createdById).get();
+          if (uDoc.exists) {
+            const ud = uDoc.data()!;
+            createdBy = { id: uDoc.id, name: ud.name, username: ud.username };
+          }
+        }
+
+        return {
+          ...event,
+          createdBy,
+          _count: { teams: teamsSnap.size, orphanListings: orphansSnap.size },
+        };
+      })
+    );
+
+    return NextResponse.json({ events: enriched });
   } catch (error: any) {
     console.error("Events fetch error:", error);
     return NextResponse.json({ error: "Failed to fetch events" }, { status: 500 });
@@ -66,20 +86,21 @@ export async function POST(req: NextRequest) {
     }
 
     const { name, description, category, startDate, location, mode } = validated.data;
+    const now = FieldValue.serverTimestamp();
 
-    const event = await db.event.create({
-      data: {
-        name,
-        description,
-        category,
-        startDate: new Date(startDate),
-        location,
-        mode,
-        createdById: user.id,
-      },
+    const eventRef = await adminDb.collection("events").add({
+      name,
+      description,
+      category,
+      startDate: new Date(startDate),
+      location,
+      mode,
+      createdById: user.id,
+      createdAt: now,
+      updatedAt: now,
     });
 
-    return NextResponse.json({ success: true, event });
+    return NextResponse.json({ success: true, event: { id: eventRef.id, name, description, category, startDate, location, mode } });
   } catch (error: any) {
     console.error("Create event error:", error);
     return NextResponse.json({ error: "Failed to create event" }, { status: 500 });

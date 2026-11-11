@@ -1,13 +1,12 @@
-import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-import { db } from "./db";
+import { adminDb } from "./firebase-admin";
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "teamorphan_super_secret_jwt_key_2026_neo_brutalism"
+  process.env.JWT_SECRET || "teamsync_super_secret_jwt_key_2026_neo_brutalism"
 );
 
-const COOKIE_NAME = "teamorphan_session";
+const COOKIE_NAME = "teamsync_session";
 
 export interface SessionPayload {
   userId: string;
@@ -17,10 +16,12 @@ export interface SessionPayload {
 }
 
 export async function hashPassword(password: string): Promise<string> {
+  const bcrypt = await import("bcryptjs");
   return bcrypt.hash(password, 10);
 }
 
 export async function comparePassword(password: string, hash: string): Promise<boolean> {
+  const bcrypt = await import("bcryptjs");
   return bcrypt.compare(password, hash);
 }
 
@@ -67,27 +68,11 @@ export async function getCurrentUser() {
     const payload = await verifySessionToken(token);
     if (!payload?.userId) return null;
 
-    const user = await db.user.findUnique({
-      where: { id: payload.userId },
-      select: {
-        id: true,
-        name: true,
-        username: true,
-        email: true,
-        avatar: true,
-        bio: true,
-        college: true,
-        location: true,
-        skills: true,
-        interests: true,
-        role: true,
-        isSuspended: true,
-        createdAt: true,
-      },
-    });
-
-    if (!user || user.isSuspended) return null;
-    return user;
+    const user = await adminDb.collection("users").doc(payload.userId).get();
+    if (!user.exists) return null;
+    const userData = { id: user.id, ...user.data() } as any;
+    if (!userData || userData.isSuspended) return null;
+    return userData;
   } catch {
     return null;
   }

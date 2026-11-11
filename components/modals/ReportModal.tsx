@@ -74,7 +74,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             Report Submitted
           </h4>
           <p className="text-xs font-semibold text-neutral-600">
-            Our moderation team will review this listing shortly. Thank you for keeping TeamOrphan safe.
+            Our moderation team will review this listing shortly. Thank you for keeping TeamSync safe.
           </p>
         </div>
       ) : (

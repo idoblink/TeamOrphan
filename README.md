@@ -1,13 +1,12 @@
 <div align="center">
 
-# TeamOrphan
+# TeamSync – Event-Based Team Formation and Matching System
 
 ### Last-Minute Event Teammate Matching Platform with 24-Hour Recruitment Cutoff Protocol
 
 <br/>
 
 <div align="center">
-    <a href="https://team-orphan.vercel.app/">Live Demo</a> •
     <a href="#quick-start">Quick Start</a> •
     <a href="#key-features">Key Features</a> •
     <a href="#architecture">Architecture</a> •
@@ -18,19 +17,15 @@
 
 <br/>
 
-A full-stack, neo-brutalist web application designed for students, developers, competitive programmers, and participants in hackathons, esports, robotics arenas, and college activities. TeamOrphan connects incomplete teams with available talent and enforces a strict, server-verified 24-hour recruitment freeze before event kickoff.
-
-**Live Application**: [https://team-orphan.vercel.app/](https://team-orphan.vercel.app/)
+A full-stack, neo-brutalist web application designed for students, developers, competitive programmers, and participants in hackathons, esports, robotics arenas, and college activities. **TeamSync – Event-Based Team Formation and Matching System** connects incomplete teams with available talent, powers intelligent compatibility calculations, and enforces a strict, server-verified 24-hour recruitment freeze before event kickoff backed by Firebase Firestore.
 
 <br/>
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-team--orphan.vercel.app-blueviolet?style=flat-square)](https://team-orphan.vercel.app/)
 [![Next.js](https://img.shields.io/badge/Next.js-14.2-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react&logoColor=black)](https://reactjs.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![Prisma](https://img.shields.io/badge/Prisma-5.22-2D3748?style=flat-square&logo=prisma&logoColor=white)](https://www.prisma.io/)
-[![Database](https://img.shields.io/badge/Database-SQLite%20%2F%20PostgreSQL-4169E1?style=flat-square)](https://www.postgresql.org/)
+[![Firebase](https://img.shields.io/badge/Firebase-Firestore-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com/)
 [![Zod](https://img.shields.io/badge/Validation-Zod%203.23-3E67B1?style=flat-square)](https://zod.dev/)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen?style=flat-square)](LICENSE)
 
@@ -65,12 +60,12 @@ flowchart TD
         M2 -->|Join Request Submitted| C1{"Cutoff Evaluation"}
         C1 -->|now >= event.startDate - 24h| C2["400 Reject: Recruitment Closed"]
         C1 -->|team.members >= team.maxMembers| C3["400 Reject: Team Full"]
-        C1 -->|Valid & Open| C4["Transaction: Add Member & Increment Count"]
+        C1 -->|Valid & Open| C4["Batch Commit: Add Member & Increment Count"]
     end
 
-    subgraph Data_Layer [Prisma ORM & Relational Persistence]
-        C4 & M1 & M3 --> PRISMA["Prisma Client Singleton"]
-        PRISMA --> DB[("SQLite (Dev) / PostgreSQL (Prod)")]
+    subgraph Data_Layer [Firebase Cloud Firestore Persistence]
+        C4 & M1 & M3 --> FIREBASE["Firebase Admin SDK Firestore Singleton"]
+        FIREBASE --> DB[("Google Cloud Firestore")]
     end
 ```
 
@@ -162,7 +157,7 @@ const INTERESTS_WEIGHT = 0.10;
 ## Project Structure
 
 ```text
-TeamOrphan/
+TeamSync/
 ├── app/
 │   ├── (auth)/
 │   │   ├── login/page.tsx           # Authentication login
@@ -193,13 +188,12 @@ TeamOrphan/
 ├── lib/
 │   ├── auth.ts                      # JWT and session management
 │   ├── cutoff.ts                    # 24-hour protocol validator
-│   ├── db.ts                        # Prisma client singleton
+│   ├── db.ts                        # Unified database export
+│   ├── firebase.ts                  # Firebase Client SDK
+│   ├── firebase-admin.ts            # Firebase Admin SDK & Firestore instance
 │   ├── matching.ts                  # Compatibility scoring engine
+│   ├── utils.ts                     # Utility helpers
 │   └── validation.ts                # Zod schemas
-├── prisma/
-│   ├── schema.prisma                # Relational schema
-│   ├── seed.js                      # Seed data script
-│   └── clean.js                     # Database reset script
 ├── package.json
 └── README.md
 ```
@@ -211,36 +205,38 @@ TeamOrphan/
 ### 1. Prerequisites
 - Node.js 18.0 or higher
 - npm, pnpm, or yarn
+- A Firebase project with Firestore Database enabled
 
 ### 2. Installation
 ```bash
-git clone https://github.com/pprbkt/TeamOrphan.git
-cd TeamOrphan
+git clone https://github.com/pprbkt/TeamSync.git
+cd TeamSync
 npm install
 ```
 
 ### 3. Environment Configuration
-Create a `.env` file in the root directory:
+Create a `.env` file in the root directory (refer to `.env.example`):
 ```env
-DATABASE_URL="file:./dev.db"
+# JWT & App
 JWT_SECRET="your_secure_jwt_secret_key_change_in_production"
 NODE_ENV="development"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
+
+# Firebase Client SDK
+NEXT_PUBLIC_FIREBASE_API_KEY="your_api_key"
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="your-project.firebaseapp.com"
+NEXT_PUBLIC_FIREBASE_PROJECT_ID="your-project-id"
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="your-project.appspot.com"
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="your_sender_id"
+NEXT_PUBLIC_FIREBASE_APP_ID="your_app_id"
+
+# Firebase Admin SDK (Server)
+FIREBASE_PROJECT_ID="your-project-id"
+FIREBASE_CLIENT_EMAIL="firebase-adminsdk-xxxxx@your-project.iam.gserviceaccount.com"
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_KEY_HERE\n-----END PRIVATE KEY-----\n"
 ```
 
-### 4. Database Setup
-```bash
-# Push schema to SQLite
-npx prisma db push
-
-# Optional: Seed sample events and teams for testing
-npm run db:seed
-
-# Optional: Purge database to clean state
-npm run db:clean
-```
-
-### 5. Start Development Server
+### 4. Start Development Server
 ```bash
 npm run dev
 ```
@@ -262,13 +258,14 @@ npm run start
 
 ## Deployment
 
-### Vercel Deployment with PostgreSQL
+### Vercel Deployment with Firebase
 1. Push the repository to GitHub.
-2. Import the repository into [Vercel](https://vercel.com).
-3. Connect a cloud PostgreSQL instance (Vercel Postgres / Neon / Supabase).
-4. Update `provider = "postgresql"` in `prisma/schema.prisma`.
-5. Set `DATABASE_URL` in Vercel Environment Variables.
-6. Trigger deployment.
+2. Import the project into [Vercel](https://vercel.com).
+3. Set your environment variables in Vercel project settings:
+   - `JWT_SECRET`
+   - `NEXT_PUBLIC_FIREBASE_*` configuration variables
+   - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (or `FIREBASE_SERVICE_ACCOUNT_JSON` as a base64-encoded string)
+4. Trigger deployment.
 
 ---
 

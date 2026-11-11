@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { adminDb } from "@/lib/firebase-admin";
 import { getCurrentUser } from "@/lib/auth";
 import { TeamCard } from "@/components/cards/TeamCard";
 import { OrphanCard } from "@/components/cards/OrphanCard";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 interface DiscoverPageProps {
   searchParams: {
-    tab?: string; // "teams" | "orphans"
+    tab?: string;
     search?: string;
     category?: string;
     mode?: string;
@@ -30,116 +30,96 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
   const urgency = searchParams.urgency || "ALL";
   const skill = searchParams.skill || "";
 
-  // 1. Fetch Teams
-  const teamWhere: any = {};
-  if (category !== "ALL") teamWhere.event = { ...teamWhere.event, category };
-  if (mode !== "ALL") teamWhere.event = { ...teamWhere.event, mode };
-  if (skill) teamWhere.requiredSkills = { contains: skill };
+  // 1. Fetch and filter Teams
+  const teamsSnap = await adminDb.collection("teams").orderBy("createdAt", "desc").get();
+  let rawTeams = teamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+
+  // Enrich with event + creator + members
+  rawTeams = await Promise.all(
+    rawTeams.map(async (team) => {
+      const eDoc = await adminDb.collection("events").doc(team.eventId).get();
+      const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+      const cDoc = await adminDb.collection("users").doc(team.creatorId).get();
+      const creator = cDoc.exists ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar } : null;
+      const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", team.id).get();
+      const members = membersSnap.docs.map((m) => ({ id: m.id, ...m.data() }));
+      return { ...team, event, creator, members, _count: { members: membersSnap.size } };
+    })
+  );
+  rawTeams = rawTeams.filter((t) => t.event !== null);
+
+  if (category !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.category === category);
+  if (mode !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.mode === mode);
+  if (skill) rawTeams = rawTeams.filter((t) => t.requiredSkills?.toLowerCase().includes(skill.toLowerCase()));
   if (search) {
-    teamWhere.OR = [
-      { name: { contains: search } },
-      { description: { contains: search } },
-      { requiredSkills: { contains: search } },
-      { event: { name: { contains: search } } },
-    ];
+    const s = search.toLowerCase();
+    rawTeams = rawTeams.filter((t) =>
+      t.name?.toLowerCase().includes(s) ||
+      t.description?.toLowerCase().includes(s) ||
+      t.requiredSkills?.toLowerCase().includes(s) ||
+      t.event?.name?.toLowerCase().includes(s)
+    );
   }
 
-  const rawTeams = await db.team.findMany({
-    where: teamWhere,
-    include: {
-      event: true,
-      creator: { select: { id: true, name: true, username: true, avatar: true } },
-      members: {
-        include: { user: { select: { name: true, avatar: true } } },
-      },
-      _count: { select: { members: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-
-  // Filter urgency if needed
   let teams = rawTeams;
   if (urgency === "urgent") {
-    const now = new Date().getTime();
+    const now = Date.now();
     teams = rawTeams.filter((t) => {
-      const start = new Date(t.event.startDate).getTime();
+      const start = t.event.startDate?.toMillis ? t.event.startDate.toMillis() : new Date(t.event.startDate).getTime();
       const cutoff = start - 24 * 60 * 60 * 1000;
       const remaining = cutoff - now;
       return remaining > 0 && remaining <= 24 * 60 * 60 * 1000;
     });
   }
 
-  // Calculate matches for teams if user is logged in
   const teamsWithMatches = teams.map((team) => {
     let match = null;
     if (user) {
       match = calculateCompatibility(
-        { skills: user.skills, interests: user.interests, location: user.location },
-        {
-          requiredSkills: team.requiredSkills,
-          preferredSkills: team.preferredSkills,
-          category: team.event.category,
-          location: team.event.location,
-          mode: team.event.mode,
-        }
+        { skills: (user as any).skills, interests: (user as any).interests, location: (user as any).location },
+        { requiredSkills: team.requiredSkills, preferredSkills: team.preferredSkills, category: team.event.category, location: team.event.location, mode: team.event.mode }
       );
     }
     return { team, match };
   });
 
-  // 2. Fetch Orphan Listings
-  const orphanWhere: any = { status: "ACTIVE" };
-  if (category !== "ALL") {
-    orphanWhere.OR = [
-      { targetCategory: category },
-      { targetEvent: { category } },
-    ];
-  }
-  if (mode !== "ALL") orphanWhere.mode = mode;
-  if (skill) orphanWhere.skills = { contains: skill };
-  if (search) {
-    orphanWhere.OR = [
-      { bio: { contains: search } },
-      { skills: { contains: search } },
-      { user: { name: { contains: search } } },
-      { user: { college: { contains: search } } },
-      { user: { location: { contains: search } } },
-    ];
-  }
+  // 2. Fetch and filter Orphan Listings
+  const orphansSnap = await adminDb.collection("orphanListings").where("status", "==", "ACTIVE").orderBy("createdAt", "desc").get();
+  let rawOrphans = orphansSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
-  const rawOrphans = await db.orphanListing.findMany({
-    where: orphanWhere,
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          username: true,
-          avatar: true,
-          college: true,
-          location: true,
-          skills: true,
-          interests: true,
-        },
-      },
-      targetEvent: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  rawOrphans = await Promise.all(
+    rawOrphans.map(async (o) => {
+      const uDoc = await adminDb.collection("users").doc(o.userId).get();
+      const orphanUser = uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, username: uDoc.data()!.username, avatar: uDoc.data()!.avatar, college: uDoc.data()!.college, location: uDoc.data()!.location, skills: uDoc.data()!.skills, interests: uDoc.data()!.interests } : null;
+      let targetEvent = null;
+      if (o.targetEventId) {
+        const eDoc = await adminDb.collection("events").doc(o.targetEventId).get();
+        if (eDoc.exists) targetEvent = { id: eDoc.id, ...eDoc.data() };
+      }
+      return { ...o, user: orphanUser, targetEvent };
+    })
+  );
+
+  if (mode !== "ALL") rawOrphans = rawOrphans.filter((o) => o.mode === mode);
+  if (skill) rawOrphans = rawOrphans.filter((o) => o.skills?.toLowerCase().includes(skill.toLowerCase()));
+  if (category !== "ALL") rawOrphans = rawOrphans.filter((o) => o.targetCategory === category || o.targetEvent?.category === category);
+  if (search) {
+    const s = search.toLowerCase();
+    rawOrphans = rawOrphans.filter((o) =>
+      o.bio?.toLowerCase().includes(s) ||
+      o.skills?.toLowerCase().includes(s) ||
+      o.user?.name?.toLowerCase().includes(s) ||
+      o.user?.college?.toLowerCase().includes(s) ||
+      o.user?.location?.toLowerCase().includes(s)
+    );
+  }
 
   const orphansWithMatches = rawOrphans.map((orphan) => {
     let match = null;
     if (user) {
       match = calculateCompatibility(
-        {
-          skills: orphan.skills,
-          interests: orphan.user.interests,
-          location: orphan.location || orphan.user.location,
-        },
-        {
-          requiredSkills: user.skills,
-          category: category !== "ALL" ? category : "Hackathon",
-        }
+        { skills: orphan.skills, interests: orphan.user?.interests || "[]", location: orphan.location || orphan.user?.location },
+        { requiredSkills: (user as any).skills, category: category !== "ALL" ? category : "Hackathon" }
       );
     }
     return { orphan, match };
