@@ -7,12 +7,20 @@ const JWT_SECRET = new TextEncoder().encode(
 );
 
 const COOKIE_NAME = "teamsync_session";
+const ACCOUNTS_COOKIE = "teamsync_accounts";
 
 export interface SessionPayload {
   userId: string;
   email: string;
   username: string;
+  name?: string;
   role: string;
+  avatar?: string | null;
+  bio?: string | null;
+  college?: string | null;
+  location?: string | null;
+  skills?: string;
+  interests?: string;
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -59,6 +67,45 @@ export async function clearSessionCookie() {
   cookieStore.delete(COOKIE_NAME);
 }
 
+export async function getRegisteredAccounts(): Promise<any[]> {
+  try {
+    const cookieStore = cookies();
+    const raw = cookieStore.get(ACCOUNTS_COOKIE)?.value;
+    if (!raw) return [];
+    const parsed = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveAccountToRegistry(account: any) {
+  try {
+    const accounts = await getRegisteredAccounts();
+    const existingIdx = accounts.findIndex(
+      (a: any) =>
+        a.id === account.id ||
+        a.email?.toLowerCase() === account.email?.toLowerCase() ||
+        a.username?.toLowerCase() === account.username?.toLowerCase()
+    );
+    if (existingIdx >= 0) {
+      accounts[existingIdx] = account;
+    } else {
+      accounts.push(account);
+    }
+    const cookieStore = cookies();
+    cookieStore.set(ACCOUNTS_COOKIE, Buffer.from(JSON.stringify(accounts)).toString("base64"), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 365 * 24 * 60 * 60,
+    });
+  } catch (e) {
+    console.error("Failed to save account to registry:", e);
+  }
+}
+
 export async function getCurrentUser() {
   try {
     const cookieStore = cookies();
@@ -68,8 +115,28 @@ export async function getCurrentUser() {
     const payload = await verifySessionToken(token);
     if (!payload?.userId) return null;
 
-    const user = tinydb.collection("users").findUnique((u: any) => u.id === payload.userId);
-    if (!user || user.isSuspended) return null;
+    let user = tinydb.collection("users").findUnique((u: any) => u.id === payload.userId);
+
+    // Re-hydrate registered user into this container's in-memory TinyDB if new serverless instance
+    if (!user) {
+      user = tinydb.collection("users").insert({
+        id: payload.userId,
+        name: payload.name || payload.username,
+        email: payload.email,
+        username: payload.username,
+        role: payload.role || "USER",
+        avatar: payload.avatar || null,
+        bio: payload.bio || null,
+        college: payload.college || null,
+        location: payload.location || null,
+        skills: payload.skills || JSON.stringify([]),
+        interests: payload.interests || JSON.stringify([]),
+        passwordHash: "",
+        isSuspended: false,
+      });
+    }
+
+    if (user.isSuspended) return null;
     return user;
   } catch {
     return null;

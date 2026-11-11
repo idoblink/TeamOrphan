@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tinydb } from "@/lib/tinydb";
-import { hashPassword, setSessionCookie } from "@/lib/auth";
+import { setSessionCookie, saveAccountToRegistry } from "@/lib/auth";
 import { RegisterSchema } from "@/lib/validation";
 
 export async function POST(req: NextRequest) {
@@ -53,7 +53,27 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       email: user.email,
       username: user.username,
+      name: user.name,
       role: user.role,
+      bio: user.bio,
+      college: user.college,
+      location: user.location,
+      skills: user.skills,
+      interests: user.interests,
+    });
+
+    await saveAccountToRegistry({
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      name: user.name,
+      passwordHash: user.passwordHash,
+      role: user.role,
+      bio: user.bio,
+      college: user.college,
+      location: user.location,
+      skills: user.skills,
+      interests: user.interests,
     });
 
     return NextResponse.json({

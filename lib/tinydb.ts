@@ -29,7 +29,7 @@ const defaultData: Schema = {
       name: "Alex Vance",
       username: "alex_v",
       email: "alex@example.com",
-      passwordHash: "$2a$10$wEkgzWc8Gq8uSjM0o75f9eeQZ0m1yWc1/fUfIekj1mEvs4uD6Z58O", // password123
+      passwordHash: "$2a$10$O7cnGapZ4ueWKuHlhNchMuRy83YPBImweg8xXsqJmJ4Kx5g8WnDve", // password123
       avatar: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80",
       college: "BMS College of Engineering",
       location: "Bangalore, India",
@@ -46,7 +46,7 @@ const defaultData: Schema = {
       name: "Marcus Chen",
       username: "marcus_c",
       email: "marcus@example.com",
-      passwordHash: "$2a$10$wEkgzWc8Gq8uSjM0o75f9eeQZ0m1yWc1/fUfIekj1mEvs4uD6Z58O", // password123
+      passwordHash: "$2a$10$O7cnGapZ4ueWKuHlhNchMuRy83YPBImweg8xXsqJmJ4Kx5g8WnDve", // password123
       avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
       college: "Institute of Technology",
       location: "Bangalore, India",
@@ -63,7 +63,7 @@ const defaultData: Schema = {
       name: "Admin Moderator",
       username: "admin",
       email: "admin@teamsync.org",
-      passwordHash: "$2a$10$wEkgzWc8Gq8uSjM0o75f9eeQZ0m1yWc1/fUfIekj1mEvs4uD6Z58O", // password123
+      passwordHash: "$2a$10$O7cnGapZ4ueWKuHlhNchMuRy83YPBImweg8xXsqJmJ4Kx5g8WnDve", // password123
       college: "TeamSync HQ",
       location: "Global",
       bio: "Platform safety and team matching coordinator.",
