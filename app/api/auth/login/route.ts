@@ -15,6 +15,8 @@ export async function POST(req: NextRequest) {
     const { login, password } = validated.data;
     const loginLower = login.toLowerCase();
 
+    await tinydb.sync(true);
+
     let user = tinydb.collection("users").findFirst((u: any) =>
       u.email?.toLowerCase() === loginLower || u.username?.toLowerCase() === loginLower
     );

@@ -5,9 +5,11 @@ import { JoinRequestSchema } from "@/lib/validation";
 import { checkRecruitmentAllowed } from "@/lib/cutoff";
 import { saveJoinRequestToCookie, saveMemberToCookie, syncDatabaseFromCookies } from "@/lib/cookie-sync";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   try {
-    syncDatabaseFromCookies();
+    await tinydb.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Please log in to join a team" }, { status: 401 });
@@ -96,7 +98,7 @@ export async function POST(req: NextRequest) {
       read: false,
     });
 
-    saveJoinRequestToCookie(jr);
+    await tinydb.persist();
 
     return NextResponse.json({
       success: true,
@@ -121,7 +123,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    syncDatabaseFromCookies();
+    await tinydb.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -156,7 +158,6 @@ export async function PATCH(req: NextRequest) {
 
     if (action === "REJECT") {
       tinydb.collection("joinRequests").update(requestId, { status: "REJECTED" });
-      saveJoinRequestToCookie({ ...jr, status: "REJECTED" });
 
       tinydb.collection("notifications").insert({
         userId: jr.userId,
@@ -167,6 +168,7 @@ export async function PATCH(req: NextRequest) {
         read: false,
       });
 
+      await tinydb.persist();
       return NextResponse.json({ success: true, status: "REJECTED" });
     }
 
@@ -194,9 +196,6 @@ export async function PATCH(req: NextRequest) {
     tinydb.collection("teamMembers").insert(newMember);
     tinydb.collection("joinRequests").update(requestId, { status: "ACCEPTED" });
 
-    saveJoinRequestToCookie({ ...jr, status: "ACCEPTED" });
-    saveMemberToCookie(newMember);
-
     if (members.length + 1 >= team.maxMembers) {
       tinydb.collection("teams").update(jr.teamId, { status: "FULL" });
     }
@@ -214,6 +213,8 @@ export async function PATCH(req: NextRequest) {
       link: `/teams/${jr.teamId}`,
       read: false,
     });
+
+    await tinydb.persist();
 
     const applicantUser = tinydb.collection("users").findUnique((u: any) => u.id === jr.userId);
 

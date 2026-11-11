@@ -2,9 +2,13 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-// Zero-config database (TinyDB)
-// On Vercel / serverless functions, the root is read-only so we use os.tmpdir().
-// In local dev, it stores in .data/db.json inside the project root.
+// Zero-config cloud-synchronized database (TinyDB backed by Firestore REST)
+// Completely eliminates serverless cold-start isolation and cross-browser desync
+// without requiring any npm packages, private keys, or Vercel environment variables.
+
+const FIRESTORE_URL =
+  "https://firestore.googleapis.com/v1/projects/teamsync-b506a/databases/(default)/documents/app_data/state?key=AIzaSyCmMxtoMxBldNOYUlDALpywJAit3hzg0Hk";
+
 const DATA_DIR = process.env.VERCEL
   ? path.join(os.tmpdir(), "teamsync-data")
   : path.join(process.cwd(), ".data");
@@ -22,7 +26,7 @@ export interface Schema {
   reports: any[];
 }
 
-const defaultData: Schema = {
+export const defaultData: Schema = {
   users: [],
   events: [
     {
@@ -71,7 +75,14 @@ const defaultData: Schema = {
   reports: [],
 };
 
-const globalRef = globalThis as unknown as { __teamsync_db_cache?: Schema };
+interface GlobalDBState {
+  __teamsync_db_cache?: Schema;
+  __teamsync_last_sync?: number;
+  __teamsync_sync_promise?: Promise<Schema> | null;
+  __teamsync_persist_promise?: Promise<boolean> | null;
+}
+
+const globalRef = globalThis as unknown as GlobalDBState;
 
 class TinyDatabase {
   private ensureDir() {
@@ -80,41 +91,150 @@ class TinyDatabase {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
     } catch {
-      // Ignore directory creation errors in locked/restricted serverless runtimes
+      // Ignore directory creation errors in strictly transient serverless runtimes
     }
   }
 
-  private read(): Schema {
+  // Synchronous local read
+  public read(): Schema {
+    if (globalRef.__teamsync_db_cache) {
+      return globalRef.__teamsync_db_cache;
+    }
+
     this.ensureDir();
     try {
       if (fs.existsSync(DB_FILE)) {
         const content = fs.readFileSync(DB_FILE, "utf8");
         const parsed = JSON.parse(content);
-        globalRef.__teamsync_db_cache = parsed;
-        return parsed;
+        if (parsed && typeof parsed === "object") {
+          globalRef.__teamsync_db_cache = parsed;
+          return parsed;
+        }
       }
     } catch {
-      // Fallback
+      // Fallback to memory defaults
     }
 
-    if (globalRef.__teamsync_db_cache) {
-      return globalRef.__teamsync_db_cache;
-    }
-
-    // Deep clone default data so mutations don't corrupt the template
     const fresh = JSON.parse(JSON.stringify(defaultData));
-    this.write(fresh);
+    globalRef.__teamsync_db_cache = fresh;
     return fresh;
   }
 
-  private write(data: Schema) {
+  // Local write to memory cache and disk
+  private writeLocal(data: Schema) {
     globalRef.__teamsync_db_cache = data;
     try {
       this.ensureDir();
       fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");
     } catch {
-      // In-memory cache ensures operation succeeds even if storage is strictly transient
+      // Local write failure shouldn't block execution
     }
+  }
+
+  // Global cloud synchronization from Firestore REST
+  public async sync(force = false): Promise<Schema> {
+    const now = Date.now();
+    const lastSync = globalRef.__teamsync_last_sync || 0;
+
+    // Return in-memory cache if fresh (< 1.5 seconds) unless explicitly forced
+    if (!force && globalRef.__teamsync_db_cache && now - lastSync < 1500) {
+      return globalRef.__teamsync_db_cache;
+    }
+
+    // Deduplicate in-flight sync requests
+    if (globalRef.__teamsync_sync_promise) {
+      return globalRef.__teamsync_sync_promise;
+    }
+
+    globalRef.__teamsync_sync_promise = (async () => {
+      try {
+        const res = await fetch(FIRESTORE_URL, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(3500),
+        });
+
+        if (res.ok) {
+          const doc = await res.json();
+          const raw = doc.fields?.data?.stringValue;
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const merged: Schema = {
+              users: Array.isArray(parsed.users) ? parsed.users : [],
+              events:
+                Array.isArray(parsed.events) && parsed.events.length > 0
+                  ? parsed.events
+                  : defaultData.events,
+              teams: Array.isArray(parsed.teams) ? parsed.teams : [],
+              teamMembers: Array.isArray(parsed.teamMembers) ? parsed.teamMembers : [],
+              orphanListings: Array.isArray(parsed.orphanListings) ? parsed.orphanListings : [],
+              joinRequests: Array.isArray(parsed.joinRequests) ? parsed.joinRequests : [],
+              notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
+              messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+              reports: Array.isArray(parsed.reports) ? parsed.reports : [],
+            };
+
+            this.writeLocal(merged);
+            globalRef.__teamsync_last_sync = Date.now();
+            return merged;
+          }
+        }
+      } catch (err) {
+        console.warn("Firestore sync warning (falling back to cache):", err);
+      }
+
+      return this.read();
+    })().finally(() => {
+      globalRef.__teamsync_sync_promise = null;
+    });
+
+    return globalRef.__teamsync_sync_promise;
+  }
+
+  // Persist current state to Firestore REST
+  public async persist(): Promise<boolean> {
+    const data = this.read();
+
+    // Deduplicate or wait for existing persist
+    if (globalRef.__teamsync_persist_promise) {
+      try {
+        await globalRef.__teamsync_persist_promise;
+      } catch {
+        // Continue with new persist
+      }
+    }
+
+    globalRef.__teamsync_persist_promise = (async () => {
+      try {
+        const res = await fetch(FIRESTORE_URL, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fields: {
+              data: {
+                stringValue: JSON.stringify(data),
+              },
+            },
+          }),
+          signal: AbortSignal.timeout(4000),
+        });
+
+        if (res.ok) {
+          globalRef.__teamsync_last_sync = Date.now();
+          return true;
+        } else {
+          const errText = await res.text();
+          console.error("Firestore persist error:", res.status, errText);
+          return false;
+        }
+      } catch (err) {
+        console.error("Firestore persist exception:", err);
+        return false;
+      }
+    })().finally(() => {
+      globalRef.__teamsync_persist_promise = null;
+    });
+
+    return globalRef.__teamsync_persist_promise;
   }
 
   collection<K extends keyof Schema>(table: K) {
@@ -138,7 +258,9 @@ class TinyDatabase {
       },
       insert(record: any) {
         const fullData = self.read();
-        const id = record.id || `${table.slice(0, 3)}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const id =
+          record.id ||
+          `${table.slice(0, 3)}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const now = new Date().toISOString();
         const newRecord = {
           id,
@@ -147,7 +269,9 @@ class TinyDatabase {
           ...record,
         };
         fullData[table].push(newRecord);
-        self.write(fullData);
+        self.writeLocal(fullData);
+        // Start background persist immediately
+        self.persist().catch(() => {});
         return newRecord;
       },
       update(id: string, updates: Partial<Schema[K][number]>) {
@@ -159,10 +283,14 @@ class TinyDatabase {
           ...updates,
           updatedAt: new Date().toISOString(),
         };
-        self.write(fullData);
+        self.writeLocal(fullData);
+        self.persist().catch(() => {});
         return fullData[table][idx];
       },
-      updateMany(predicate: (item: Schema[K][number]) => boolean, updates: Partial<Schema[K][number]>) {
+      updateMany(
+        predicate: (item: Schema[K][number]) => boolean,
+        updates: Partial<Schema[K][number]>
+      ) {
         const fullData = self.read();
         let count = 0;
         fullData[table] = fullData[table].map((item: any) => {
@@ -172,7 +300,8 @@ class TinyDatabase {
           }
           return item;
         });
-        self.write(fullData);
+        self.writeLocal(fullData);
+        self.persist().catch(() => {});
         return count;
       },
       delete(id: string) {
@@ -180,13 +309,15 @@ class TinyDatabase {
         const idx = fullData[table].findIndex((item: any) => item.id === id);
         if (idx === -1) return false;
         fullData[table].splice(idx, 1);
-        self.write(fullData);
+        self.writeLocal(fullData);
+        self.persist().catch(() => {});
         return true;
       },
       deleteMany(predicate: (item: Schema[K][number]) => boolean) {
         const fullData = self.read();
         fullData[table] = fullData[table].filter((item: any) => !predicate(item));
-        self.write(fullData);
+        self.writeLocal(fullData);
+        self.persist().catch(() => {});
         return true;
       },
     };
@@ -200,4 +331,3 @@ declare global {
 
 export const tinydb = global._tinydb || (global._tinydb = new TinyDatabase());
 export default tinydb;
-

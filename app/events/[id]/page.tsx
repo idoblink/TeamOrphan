@@ -17,6 +17,7 @@ export default async function EventDetailPage({
 }: {
   params: { id: string };
 }) {
+  await tinydb.sync();
   const user = await getCurrentUser();
   const event = tinydb.collection("events").findUnique((e: any) => e.id === params.id);
   if (!event) notFound();

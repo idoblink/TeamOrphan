@@ -2,14 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    await tinydb.sync();
     const user = await getCurrentUser();
 
-    const team = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+    let team = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+    if (!team) {
+      await tinydb.sync(true);
+      team = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+    }
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
@@ -58,6 +65,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    await tinydb.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -76,6 +84,7 @@ export async function DELETE(
     tinydb.collection("teamMembers").deleteMany((m: any) => m.teamId === params.id);
     tinydb.collection("joinRequests").deleteMany((jr: any) => jr.teamId === params.id);
 
+    await tinydb.persist();
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Team delete error:", error);

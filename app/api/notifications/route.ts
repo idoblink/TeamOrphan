@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
+    await tinydb.sync();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ notifications: [], unreadCount: 0 });
@@ -25,6 +28,7 @@ export async function GET() {
 
 export async function PATCH(req: NextRequest) {
   try {
+    await tinydb.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -37,11 +41,13 @@ export async function PATCH(req: NextRequest) {
         (n: any) => n.userId === user.id && !n.read,
         { read: true }
       );
+      await tinydb.persist();
       return NextResponse.json({ success: true });
     }
 
     if (id) {
       tinydb.collection("notifications").update(id, { read: true });
+      await tinydb.persist();
       return NextResponse.json({ success: true });
     }
 

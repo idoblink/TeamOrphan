@@ -25,6 +25,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  await tinydb.sync();
   const totalMemberships = tinydb.collection("teamMembers").count();
   const totalActiveTeams = tinydb.collection("teams").count((t: any) => t.status === "OPEN");
   const totalEvents = tinydb.collection("events").count();

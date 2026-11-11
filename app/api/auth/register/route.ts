@@ -16,6 +16,8 @@ export async function POST(req: NextRequest) {
     const { name, email, password, username, college, location, skills, interests, bio } =
       validated.data;
 
+    await tinydb.sync(true);
+
     const emailLower = email.toLowerCase();
     const usernameLower = username.toLowerCase();
 
@@ -48,6 +50,8 @@ export async function POST(req: NextRequest) {
       role: "USER",
       isSuspended: false,
     });
+
+    await tinydb.persist();
 
     await setSessionCookie({
       userId: user.id,

@@ -3,8 +3,11 @@ import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { MessageSchema } from "@/lib/validation";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
+    await tinydb.sync();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -103,6 +106,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    await tinydb.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -139,6 +143,8 @@ export async function POST(req: NextRequest) {
       link: `/messages?chatWith=${user.id}`,
       read: false,
     });
+
+    await tinydb.persist();
 
     return NextResponse.json({
       success: true,

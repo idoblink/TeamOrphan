@@ -16,6 +16,7 @@ interface EventsPageProps {
 }
 
 export default async function EventsPage({ searchParams }: EventsPageProps) {
+  await tinydb.sync();
   const category = searchParams.category || "ALL";
   const mode = searchParams.mode || "ALL";
   const search = searchParams.search || "";

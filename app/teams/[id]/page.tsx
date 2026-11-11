@@ -14,10 +14,14 @@ export default async function TeamPage({
 }: {
   params: { id: string };
 }) {
-  syncDatabaseFromCookies();
+  await tinydb.sync(true);
   const currentUser = await getCurrentUser();
 
-  const teamData = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+  let teamData = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+  if (!teamData) {
+    await tinydb.sync(true);
+    teamData = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+  }
   if (!teamData) notFound();
 
   const event = tinydb.collection("events").findUnique((e: any) => e.id === teamData.eventId);

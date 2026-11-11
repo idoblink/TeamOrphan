@@ -22,7 +22,7 @@ interface TeamsPageProps {
 }
 
 export default async function TeamsPage({ searchParams }: TeamsPageProps) {
-  syncDatabaseFromCookies();
+  await tinydb.sync();
   const user = await getCurrentUser();
   const category = searchParams.category || "ALL";
   const mode = searchParams.mode || "ALL";

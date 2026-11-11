@@ -5,9 +5,11 @@ import { CreateTeamSchema } from "@/lib/validation";
 import { checkRecruitmentAllowed } from "@/lib/cutoff";
 import { saveTeamToCookie, saveMemberToCookie, syncDatabaseFromCookies } from "@/lib/cookie-sync";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
-    syncDatabaseFromCookies();
+    await tinydb.sync();
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
     const mode = searchParams.get("mode");
@@ -84,6 +86,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    await tinydb.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
@@ -130,8 +133,7 @@ export async function POST(req: NextRequest) {
       role: "LEADER",
     });
 
-    saveTeamToCookie(team);
-    saveMemberToCookie(member);
+    await tinydb.persist();
 
     return NextResponse.json({ success: true, team: { ...team, event } });
   } catch (error: any) {

@@ -13,9 +13,16 @@ export default async function ProfilePage({
 }) {
   const currentUser = await getCurrentUser();
 
-  const profileUserData = tinydb.collection("users").findFirst(
+  await tinydb.sync();
+  let profileUserData = tinydb.collection("users").findFirst(
     (u: any) => u.username?.toLowerCase() === params.username?.toLowerCase()
   );
+  if (!profileUserData) {
+    await tinydb.sync(true);
+    profileUserData = tinydb.collection("users").findFirst(
+      (u: any) => u.username?.toLowerCase() === params.username?.toLowerCase()
+    );
+  }
 
   if (!profileUserData) {
     notFound();

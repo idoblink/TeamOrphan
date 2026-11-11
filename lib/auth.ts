@@ -115,9 +115,10 @@ export async function getCurrentUser() {
     const payload = await verifySessionToken(token);
     if (!payload?.userId) return null;
 
+    await tinydb.sync();
     let user = tinydb.collection("users").findUnique((u: any) => u.id === payload.userId);
 
-    // Re-hydrate registered user into this container's in-memory TinyDB if new serverless instance
+    // Re-hydrate registered user into TinyDB if new serverless instance
     if (!user) {
       user = tinydb.collection("users").insert({
         id: payload.userId,
@@ -134,6 +135,7 @@ export async function getCurrentUser() {
         passwordHash: "",
         isSuspended: false,
       });
+      await tinydb.persist();
     }
 
     if (user.isSuspended) return null;

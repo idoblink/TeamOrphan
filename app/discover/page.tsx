@@ -25,7 +25,7 @@ interface DiscoverPageProps {
 }
 
 export default async function DiscoverPage({ searchParams }: DiscoverPageProps) {
-  syncDatabaseFromCookies();
+  await tinydb.sync();
   const user = await getCurrentUser();
   const activeTab = searchParams.tab === "orphans" ? "orphans" : "teams";
   const search = searchParams.search || "";

@@ -3,8 +3,11 @@ import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { CreateEventSchema } from "@/lib/validation";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
+    await tinydb.sync();
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
     const mode = searchParams.get("mode");
@@ -49,6 +52,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    await tinydb.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
@@ -75,6 +79,8 @@ export async function POST(req: NextRequest) {
       mode,
       createdById: user.id,
     });
+
+    await tinydb.persist();
 
     return NextResponse.json({ success: true, event });
   } catch (error: any) {

@@ -3,8 +3,11 @@ import { tinydb } from "@/lib/tinydb";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateCompatibility } from "@/lib/matching";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
+    await tinydb.sync();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ matches: [] });

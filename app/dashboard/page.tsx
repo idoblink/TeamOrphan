@@ -25,7 +25,7 @@ export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
 export default async function DashboardPage() {
-  syncDatabaseFromCookies();
+  await tinydb.sync(true);
   const user = await getCurrentUser();
   if (!user) {
     redirect("/login");
