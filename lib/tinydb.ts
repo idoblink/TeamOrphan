@@ -1,9 +1,13 @@
 import fs from "fs";
 import path from "path";
+import os from "os";
 
-// File-based zero-config JSON database (TinyDB)
-// Data persists in .data/db.json inside the project root.
-const DATA_DIR = path.join(process.cwd(), ".data");
+// Zero-config database (TinyDB)
+// On Vercel / serverless functions, the root is read-only so we use os.tmpdir().
+// In local dev, it stores in .data/db.json inside the project root.
+const DATA_DIR = process.env.VERCEL
+  ? path.join(os.tmpdir(), "teamsync-data")
+  : path.join(process.cwd(), ".data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 
 export interface Schema {
@@ -167,35 +171,40 @@ class TinyDatabase {
   private cache: Schema | null = null;
 
   private ensureDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+    } catch {
+      // Ignore directory creation errors in locked/restricted serverless runtimes
     }
   }
 
   private read(): Schema {
     if (this.cache) return this.cache;
     this.ensureDir();
-    if (!fs.existsSync(DB_FILE)) {
-      this.write(defaultData);
-      return defaultData;
-    }
     try {
-      const content = fs.readFileSync(DB_FILE, "utf8");
-      this.cache = JSON.parse(content);
-      return this.cache!;
+      if (fs.existsSync(DB_FILE)) {
+        const content = fs.readFileSync(DB_FILE, "utf8");
+        this.cache = JSON.parse(content);
+        return this.cache!;
+      }
     } catch {
-      this.write(defaultData);
-      return defaultData;
+      // Fallback to default
     }
+    // Deep clone default data so mutations don't corrupt the template
+    this.cache = JSON.parse(JSON.stringify(defaultData));
+    this.write(this.cache!);
+    return this.cache!;
   }
 
   private write(data: Schema) {
-    this.ensureDir();
     this.cache = data;
     try {
+      this.ensureDir();
       fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");
-    } catch (e) {
-      console.error("TinyDB write error:", e);
+    } catch {
+      // In-memory cache ensures operation succeeds even if storage is strictly transient
     }
   }
 
