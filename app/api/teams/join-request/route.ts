@@ -94,7 +94,21 @@ export async function POST(req: NextRequest) {
       read: false,
     });
 
-    return NextResponse.json({ success: true, joinRequest: jr });
+    return NextResponse.json({
+      success: true,
+      joinRequest: {
+        ...jr,
+        user: {
+          id: user.id,
+          name: (user as any).name,
+          username: (user as any).username,
+          avatar: (user as any).avatar,
+          college: (user as any).college,
+          location: (user as any).location,
+          skills: (user as any).skills,
+        },
+      },
+    });
   } catch (error: any) {
     console.error("Join request error:", error);
     return NextResponse.json({ error: "Failed to submit join request" }, { status: 500 });
@@ -190,7 +204,28 @@ export async function PATCH(req: NextRequest) {
       read: false,
     });
 
-    return NextResponse.json({ success: true, status: "ACCEPTED" });
+    const applicantUser = tinydb.collection("users").findUnique((u: any) => u.id === jr.userId);
+
+    return NextResponse.json({
+      success: true,
+      status: "ACCEPTED",
+      member: {
+        id: `tm_${Date.now()}`,
+        teamId: jr.teamId,
+        userId: jr.userId,
+        role: "MEMBER",
+        user: applicantUser
+          ? {
+              id: applicantUser.id,
+              name: applicantUser.name,
+              username: applicantUser.username,
+              avatar: applicantUser.avatar,
+              college: applicantUser.college,
+              location: applicantUser.location,
+            }
+          : null,
+      },
+    });
   } catch (error: any) {
     console.error("Accept/reject error:", error);
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });

@@ -36,12 +36,14 @@ export function IncomingRequestsManager({
   const [requests, setRequests] = useState<IncomingRequestItem[]>(initialRequests);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [messageTarget, setMessageTarget] = useState<{ id: string; name: string } | null>(null);
   const router = useRouter();
 
   const handleAction = async (requestId: string, action: "ACCEPT" | "REJECT") => {
     setProcessingId(requestId);
     setActionError(null);
+    setActionSuccess(null);
 
     try {
       const res = await fetch("/api/teams/join-request", {
@@ -55,8 +57,13 @@ export function IncomingRequestsManager({
         throw new Error(data.error || `Failed to ${action.toLowerCase()} request`);
       }
 
-      // Remove from pending list
+      // Remove from pending list and show success
       setRequests((prev) => prev.filter((r) => r.id !== requestId));
+      setActionSuccess(
+        action === "ACCEPT"
+          ? "🎉 Candidate accepted! They have been added to your squad roster."
+          : "Application has been declined."
+      );
       router.refresh();
     } catch (err: any) {
       setActionError(err.message);
@@ -84,6 +91,13 @@ export function IncomingRequestsManager({
           Action Needed
         </span>
       </div>
+
+      {actionSuccess && (
+        <div className="flex items-center gap-2 border-2 border-black bg-brutal-green p-3 text-xs font-black text-black shadow-brutal-sm">
+          <Check className="w-4 h-4 shrink-0 stroke-[3]" />
+          <span>{actionSuccess}</span>
+        </div>
+      )}
 
       {actionError && (
         <div className="flex items-center gap-2 border-2 border-black bg-red-100 p-3 text-xs font-black text-red-700">

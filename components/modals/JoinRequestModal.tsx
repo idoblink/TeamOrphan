@@ -13,6 +13,7 @@ export interface JoinRequestModalProps {
   teamId: string;
   teamName: string;
   eventName: string;
+  onSuccess?: (joinRequest: any) => void;
 }
 
 export const JoinRequestModal: React.FC<JoinRequestModalProps> = ({
@@ -21,6 +22,7 @@ export const JoinRequestModal: React.FC<JoinRequestModalProps> = ({
   teamId,
   teamName,
   eventName,
+  onSuccess,
 }) => {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -47,12 +49,16 @@ export const JoinRequestModal: React.FC<JoinRequestModalProps> = ({
       }
 
       setSuccess(true);
+      if (onSuccess && data.joinRequest) {
+        onSuccess(data.joinRequest);
+      }
+
       setTimeout(() => {
         setSuccess(false);
         setMessage("");
         onClose();
         router.refresh();
-      }, 1800);
+      }, 1500);
     } catch (err: any) {
       setError(err.message);
     } finally {

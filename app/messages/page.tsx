@@ -155,22 +155,14 @@ function MessagesContent() {
                 <Inbox className="w-8 h-8 mx-auto text-neutral-500" />
                 <p>No active conversations yet.</p>
                 <p className="text-[11px] text-neutral-500">
-                  Quick start: message one of our active student builders below:
+                  Connect and coordinate with squad leaders and student builders on TeamSync.
                 </p>
-                <div className="flex flex-col gap-2 pt-2">
-                  <button
-                    onClick={() => setActiveContactId("usr_alex")}
-                    className="border-2 border-black bg-white p-2 text-xs font-black uppercase hover:bg-brutal-yellow text-left shadow-[2px_2px_0px_#000]"
-                  >
-                    💬 Message Alex Vance (Neural Ninjas)
-                  </button>
-                  <button
-                    onClick={() => setActiveContactId("usr_marcus")}
-                    className="border-2 border-black bg-white p-2 text-xs font-black uppercase hover:bg-brutal-yellow text-left shadow-[2px_2px_0px_#000]"
-                  >
-                    💬 Message Marcus Chen (ML Builder)
-                  </button>
-                </div>
+                <button
+                  onClick={() => router.push("/discover")}
+                  className="w-full border-2 border-black bg-brutal-yellow p-2 text-xs font-black uppercase hover:bg-black hover:text-white transition-colors shadow-brutal-sm"
+                >
+                  🔍 Browse Builders & Teams
+                </button>
               </div>
             ) : (
               conversations.map((conv) => {

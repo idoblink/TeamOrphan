@@ -62,7 +62,7 @@ export default async function TeamPage({
   return (
     <div className="py-8 px-4 sm:px-6 max-w-7xl mx-auto">
       <TeamDetailClient
-        team={team}
+        initialTeam={team}
         currentUser={currentUser}
         userMatch={userMatch}
       />

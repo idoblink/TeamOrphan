@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BrutalCard } from "@/components/ui/BrutalCard";
@@ -30,17 +30,23 @@ import {
 } from "lucide-react";
 
 interface TeamDetailClientProps {
-  team: any;
+  initialTeam: any;
   currentUser: any;
   userMatch: MatchResult | null;
 }
 
 export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
-  team,
+  initialTeam,
   currentUser,
   userMatch,
 }) => {
   const router = useRouter();
+  const [team, setTeam] = useState(initialTeam);
+
+  useEffect(() => {
+    setTeam(initialTeam);
+  }, [initialTeam]);
+
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [messageTargetUser, setMessageTargetUser] = useState<{ id: string; name: string } | null>(null);
@@ -83,6 +89,39 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
       if (!res.ok) {
         throw new Error(data.error || "Failed to process request");
       }
+
+      setTeam((prev: any) => {
+        const targetReq = prev.joinRequests?.find((r: any) => r.id === requestId);
+        const updatedRequests = (prev.joinRequests || []).map((r: any) =>
+          r.id === requestId ? { ...r, status: action === "ACCEPT" ? "ACCEPTED" : "REJECTED" } : r
+        );
+
+        if (action === "ACCEPT") {
+          const newMember = data.member || {
+            id: `tm_${Date.now()}`,
+            teamId: prev.id,
+            userId: targetReq?.userId,
+            role: "MEMBER",
+            user: targetReq?.user,
+          };
+
+          const alreadyIn = prev.members?.some((m: any) => m.userId === newMember.userId);
+          const updatedMembers = alreadyIn ? prev.members : [...(prev.members || []), newMember];
+          const isNowFull = updatedMembers.length >= prev.maxMembers;
+
+          return {
+            ...prev,
+            status: isNowFull ? "FULL" : prev.status,
+            members: updatedMembers,
+            joinRequests: updatedRequests,
+          };
+        } else {
+          return {
+            ...prev,
+            joinRequests: updatedRequests,
+          };
+        }
+      });
 
       router.refresh();
     } catch (err: any) {
@@ -486,6 +525,12 @@ export const TeamDetailClient: React.FC<TeamDetailClientProps> = ({
         teamId={team.id}
         teamName={team.name}
         eventName={team.event.name}
+        onSuccess={(newReq) => {
+          setTeam((prev: any) => ({
+            ...prev,
+            joinRequests: [...(prev.joinRequests || []), newReq],
+          }));
+        }}
       />
 
       <ReportModal
