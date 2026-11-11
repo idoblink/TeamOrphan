@@ -2,12 +2,22 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-// Zero-config cloud-synchronized database (TinyDB backed by Firestore REST)
-// Completely eliminates serverless cold-start isolation and cross-browser desync
-// without requiring any npm packages, private keys, or Vercel environment variables.
+// Zero-config NoSQL database (TinyDB backed by Redis REST API)
+// Provides instant serverless state sharing across containers and browsers
+// without requiring complex configuration or private keys.
+// Compatible with Upstash Redis, Vercel KV, and local TinyDB fallback.
 
-const FIRESTORE_URL =
-  "https://firestore.googleapis.com/v1/projects/teamsync-b506a/databases/(default)/documents/app_data/state?key=AIzaSyCmMxtoMxBldNOYUlDALpywJAit3hzg0Hk";
+const REDIS_URL =
+  process.env.UPSTASH_REDIS_REST_URL ||
+  process.env.KV_REST_API_URL ||
+  "https://major-deer-197354.upstash.io";
+
+const REDIS_TOKEN =
+  process.env.UPSTASH_REDIS_REST_TOKEN ||
+  process.env.KV_REST_API_TOKEN ||
+  "gQAAAAAAAwLqAQIgcDFiN2ZiNjlhMmUzZjg0MzVjOWM0MzZjNDlkOGUwMjkxOA";
+
+const REDIS_KEY = "teamsync_nosql_state";
 
 const DATA_DIR = process.env.VERCEL
   ? path.join(os.tmpdir(), "teamsync-data")
@@ -95,7 +105,7 @@ class TinyDatabase {
     }
   }
 
-  // Synchronous local read
+  // Synchronous local read from cache or disk
   public read(): Schema {
     if (globalRef.__teamsync_db_cache) {
       return globalRef.__teamsync_db_cache;
@@ -131,7 +141,7 @@ class TinyDatabase {
     }
   }
 
-  // Global cloud synchronization from Firestore REST
+  // Global cloud synchronization from Redis REST (NoSQL)
   public async sync(force = false): Promise<Schema> {
     const now = Date.now();
     const lastSync = globalRef.__teamsync_last_sync || 0;
@@ -148,16 +158,22 @@ class TinyDatabase {
 
     globalRef.__teamsync_sync_promise = (async () => {
       try {
-        const res = await fetch(FIRESTORE_URL, {
+        const res = await fetch(REDIS_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${REDIS_TOKEN}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(["GET", REDIS_KEY]),
           cache: "no-store",
           signal: AbortSignal.timeout(3500),
         });
 
         if (res.ok) {
           const doc = await res.json();
-          const raw = doc.fields?.data?.stringValue;
+          const raw = doc.result;
           if (raw) {
-            const parsed = JSON.parse(raw);
+            const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
             const merged: Schema = {
               users: Array.isArray(parsed.users) ? parsed.users : [],
               events:
@@ -179,7 +195,7 @@ class TinyDatabase {
           }
         }
       } catch (err) {
-        console.warn("Firestore sync warning (falling back to cache):", err);
+        console.warn("Redis sync warning (falling back to cache):", err);
       }
 
       return this.read();
@@ -190,7 +206,7 @@ class TinyDatabase {
     return globalRef.__teamsync_sync_promise;
   }
 
-  // Persist current state to Firestore REST
+  // Persist current state to Redis REST (NoSQL)
   public async persist(): Promise<boolean> {
     const data = this.read();
 
@@ -205,16 +221,13 @@ class TinyDatabase {
 
     globalRef.__teamsync_persist_promise = (async () => {
       try {
-        const res = await fetch(FIRESTORE_URL, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fields: {
-              data: {
-                stringValue: JSON.stringify(data),
-              },
-            },
-          }),
+        const res = await fetch(REDIS_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${REDIS_TOKEN}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(["SET", REDIS_KEY, JSON.stringify(data)]),
           signal: AbortSignal.timeout(4000),
         });
 
@@ -223,11 +236,11 @@ class TinyDatabase {
           return true;
         } else {
           const errText = await res.text();
-          console.error("Firestore persist error:", res.status, errText);
+          console.error("Redis persist error:", res.status, errText);
           return false;
         }
       } catch (err) {
-        console.error("Firestore persist exception:", err);
+        console.error("Redis persist exception:", err);
         return false;
       }
     })().finally(() => {

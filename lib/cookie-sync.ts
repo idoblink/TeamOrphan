@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { tinydb } from "./tinydb";
 
 // Legacy cookie-based storage shim.
-// All persistence is now centralized in Firestore REST via TinyDB,
+// All persistence is centralized in Redis / TinyDB NoSQL store,
 // providing real-time multi-device synchronization without 4KB header limits.
 
 export async function syncDatabaseFromCookies() {
@@ -24,17 +24,17 @@ export function clearLegacyCookies() {
 }
 
 export function saveTeamToCookie(_team?: any) {
-  // No-op: data is persisted to cloud store
+  // No-op: data is persisted to NoSQL store
 }
 
 export function saveMemberToCookie(_member?: any) {
-  // No-op: data is persisted to cloud store
+  // No-op: data is persisted to NoSQL store
 }
 
 export function saveOrphanToCookie(_orphan?: any) {
-  // No-op: data is persisted to cloud store
+  // No-op: data is persisted to NoSQL store
 }
 
 export function saveJoinRequestToCookie(_request?: any) {
-  // No-op: data is persisted to cloud store
+  // No-op: data is persisted to NoSQL store
 }

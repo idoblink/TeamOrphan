@@ -17,7 +17,7 @@
 
 <br/>
 
-A full-stack, neo-brutalist web application designed for students, developers, competitive programmers, and participants in hackathons, esports, robotics arenas, and college activities. **TeamSync – Event-Based Team Formation and Matching System** connects incomplete teams with available talent, powers intelligent compatibility calculations, and enforces a strict, server-verified 24-hour recruitment freeze before event kickoff backed by Firebase Firestore.
+A full-stack, neo-brutalist web application designed for students, developers, competitive programmers, and participants in hackathons, esports, robotics arenas, and college activities. **TeamSync – Event-Based Team Formation and Matching System** connects incomplete teams with available talent, powers intelligent compatibility calculations, and enforces a strict, server-verified 24-hour recruitment freeze before event kickoff backed by a fast, zero-config NoSQL database (TinyDB & Redis).
 
 <br/>
 
@@ -25,7 +25,7 @@ A full-stack, neo-brutalist web application designed for students, developers, c
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react&logoColor=black)](https://reactjs.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![Firebase](https://img.shields.io/badge/Firebase-Firestore-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com/)
+[![NoSQL](https://img.shields.io/badge/Database-TinyDB%20%2F%20Redis%20NoSQL-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
 [![Zod](https://img.shields.io/badge/Validation-Zod%203.23-3E67B1?style=flat-square)](https://zod.dev/)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen?style=flat-square)](LICENSE)
 
@@ -63,9 +63,9 @@ flowchart TD
         C1 -->|Valid & Open| C4["Batch Commit: Add Member & Increment Count"]
     end
 
-    subgraph Data_Layer [Firebase Cloud Firestore Persistence]
-        C4 & M1 & M3 --> FIREBASE["Firebase Admin SDK Firestore Singleton"]
-        FIREBASE --> DB[("Google Cloud Firestore")]
+    subgraph Data_Layer [NoSQL Persistence Layer]
+        C4 & M1 & M3 --> DB_CLIENT["TinyDB & Redis REST Client"]
+        DB_CLIENT --> DB[("NoSQL Key-Value Store (Redis / TinyDB)")]
     end
 ```
 
@@ -189,8 +189,7 @@ TeamSync/
 │   ├── auth.ts                      # JWT and session management
 │   ├── cutoff.ts                    # 24-hour protocol validator
 │   ├── db.ts                        # Unified database export
-│   ├── firebase.ts                  # Firebase Client SDK
-│   ├── firebase-admin.ts            # Firebase Admin SDK & Firestore instance
+│   ├── tinydb.ts                   # Zero-config NoSQL database (TinyDB & Redis)
 │   ├── matching.ts                  # Compatibility scoring engine
 │   ├── utils.ts                     # Utility helpers
 │   └── validation.ts                # Zod schemas
@@ -205,7 +204,6 @@ TeamSync/
 ### 1. Prerequisites
 - Node.js 18.0 or higher
 - npm, pnpm, or yarn
-- A Firebase project with Firestore Database enabled
 
 ### 2. Installation
 ```bash
@@ -215,25 +213,16 @@ npm install
 ```
 
 ### 3. Environment Configuration
-Create a `.env` file in the root directory (refer to `.env.example`):
+Create a `.env` file in the root directory:
 ```env
 # JWT & App
 JWT_SECRET="your_secure_jwt_secret_key_change_in_production"
 NODE_ENV="development"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 
-# Firebase Client SDK
-NEXT_PUBLIC_FIREBASE_API_KEY="your_api_key"
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="your-project.firebaseapp.com"
-NEXT_PUBLIC_FIREBASE_PROJECT_ID="your-project-id"
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="your-project.appspot.com"
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="your_sender_id"
-NEXT_PUBLIC_FIREBASE_APP_ID="your_app_id"
-
-# Firebase Admin SDK (Server)
-FIREBASE_PROJECT_ID="your-project-id"
-FIREBASE_CLIENT_EMAIL="firebase-adminsdk-xxxxx@your-project.iam.gserviceaccount.com"
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_KEY_HERE\n-----END PRIVATE KEY-----\n"
+# Optional: Custom Redis / Vercel KV endpoint (built-in zero-config defaults included)
+UPSTASH_REDIS_REST_URL=""
+UPSTASH_REDIS_REST_TOKEN=""
 ```
 
 ### 4. Start Development Server
@@ -258,14 +247,11 @@ npm run start
 
 ## Deployment
 
-### Vercel Deployment with Firebase
+### Vercel Zero-Config Deployment
 1. Push the repository to GitHub.
 2. Import the project into [Vercel](https://vercel.com).
-3. Set your environment variables in Vercel project settings:
-   - `JWT_SECRET`
-   - `NEXT_PUBLIC_FIREBASE_*` configuration variables
-   - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (or `FIREBASE_SERVICE_ACCOUNT_JSON` as a base64-encoded string)
-4. Trigger deployment.
+3. Click **Deploy** — works out-of-the-box without requiring database setup or mandatory environment variables!
+4. *(Optional)* Connect **Upstash Redis** or **Vercel KV** from the Vercel Storage marketplace if you prefer your own private instance.
 
 ---
 
