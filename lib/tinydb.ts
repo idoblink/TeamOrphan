@@ -8,11 +8,15 @@ import os from "os";
 // Compatible with Upstash Redis, Vercel KV, and local TinyDB fallback.
 
 const REDIS_URL =
+  process.env.STORAGE_REST_API_URL ||
+  process.env.STORAGE_REDIS_REST_URL ||
   process.env.UPSTASH_REDIS_REST_URL ||
   process.env.KV_REST_API_URL ||
   "https://major-deer-197354.upstash.io";
 
 const REDIS_TOKEN =
+  process.env.STORAGE_REST_API_TOKEN ||
+  process.env.STORAGE_REDIS_REST_TOKEN ||
   process.env.UPSTASH_REDIS_REST_TOKEN ||
   process.env.KV_REST_API_TOKEN ||
   "gQAAAAAAAwLqAQIgcDFiN2ZiNjlhMmUzZjg0MzVjOWM0MzZjNDlkOGUwMjkxOA";
