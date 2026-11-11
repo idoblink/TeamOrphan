@@ -145,3 +145,4 @@ export function saveJoinRequestToCookie(request: any) {
     });
   } catch {}
 }
+
