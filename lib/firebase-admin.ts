@@ -7,28 +7,36 @@ let adminApp: App;
 
 function initAdmin(): Firestore {
   if (getApps().length === 0) {
-    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
-    if (serviceAccountJson) {
+    if (rawServiceAccount) {
       try {
-        const serviceAccount = JSON.parse(
-          Buffer.from(serviceAccountJson, "base64").toString("utf8")
-        );
+        let jsonStr = rawServiceAccount.trim();
+        // If it was base64 encoded
+        if (!jsonStr.startsWith("{")) {
+          jsonStr = Buffer.from(jsonStr, "base64").toString("utf8");
+        }
+        const serviceAccount = JSON.parse(jsonStr);
         adminApp = initializeApp({
           credential: cert(serviceAccount),
           projectId: serviceAccount.project_id,
         });
       } catch (e) {
-        console.warn("Could not parse FIREBASE_SERVICE_ACCOUNT_JSON:", e);
+        console.error("FIREBASE_SERVICE_ACCOUNT_JSON parse error:", e);
       }
     }
 
     if (!adminApp) {
-      const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-      const projectId = process.env.FIREBASE_PROJECT_ID;
+      let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+      if (privateKey) {
+        // Strip surrounding quotes if present
+        privateKey = privateKey.replace(/^["']|["']$/g, "");
+        // Replace escaped \n with actual newlines
+        privateKey = privateKey.replace(/\\n/g, "\n");
+      }
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.replace(/^["']|["']$/g, "");
+      const projectId = process.env.FIREBASE_PROJECT_ID?.replace(/^["']|["']$/g, "");
 
-      // If credentials look like placeholders or are missing (e.g. during next build phase)
       if (
         privateKey &&
         !privateKey.includes("YOUR_KEY_HERE") &&
@@ -45,15 +53,14 @@ function initAdmin(): Firestore {
             projectId,
           });
         } catch (e) {
-          console.warn("Firebase Admin cert error:", e);
+          console.error("Firebase Admin cert error:", e);
         }
       }
     }
 
     if (!adminApp) {
-      // Fallback dummy initialization for build time / offline generation
       adminApp = initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID || "teamsync-demo",
+        projectId: process.env.FIREBASE_PROJECT_ID || "teamsync-b506a",
       });
     }
   } else {
@@ -63,7 +70,6 @@ function initAdmin(): Firestore {
   return getFirestore(adminApp);
 }
 
-// Singleton: reuse across hot-reloads in dev
 declare global {
   // eslint-disable-next-line no-var
   var _adminDb: Firestore | undefined;

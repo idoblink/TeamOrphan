@@ -37,7 +37,12 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const user = await getCurrentUser();
+  let user = null;
+  try {
+    user = await getCurrentUser();
+  } catch (err) {
+    console.error("RootLayout auth error:", err);
+  }
 
   return (
     <html lang="en" className={`${spaceGrotesk.variable} ${inter.variable}`}>
