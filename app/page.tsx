@@ -48,7 +48,7 @@ export default async function HomePage() {
         activeTeamsRaw.slice(0, 6).map(async (t) => {
           try {
             const eDoc = await adminDb.collection("events").doc(t.eventId).get();
-            const eventData = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+            const eventData = eDoc.exists ? ({ id: eDoc.id, ...eDoc.data() } as any) : null;
             if (!eventData) return null;
 
             // Normalize startDate to Date object or ISO string for client components

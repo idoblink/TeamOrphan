@@ -21,7 +21,9 @@ export default async function EventDetailPage({
   const eventDoc = await adminDb.collection("events").doc(params.id).get();
   if (!eventDoc.exists) notFound();
 
-  const eventData = { id: eventDoc.id, ...eventDoc.data() } as any;
+  const rawEventData = { id: eventDoc.id, ...eventDoc.data() } as any;
+  const startDate = rawEventData.startDate?.toDate ? rawEventData.startDate.toDate().toISOString() : new Date(rawEventData.startDate).toISOString();
+  const eventData = { ...rawEventData, startDate };
 
   // Fetch teams
   const teamsSnap = await adminDb.collection("teams").where("eventId", "==", params.id).get();

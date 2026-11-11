@@ -23,7 +23,12 @@ export default async function TeamPage({
 
   // Event
   const eventDoc = await adminDb.collection("events").doc(teamData.eventId).get();
-  const event = eventDoc.exists ? { id: eventDoc.id, ...eventDoc.data() } : null;
+  let event = null;
+  if (eventDoc.exists) {
+    const ed = eventDoc.data()!;
+    const startDate = ed.startDate?.toDate ? ed.startDate.toDate().toISOString() : new Date(ed.startDate).toISOString();
+    event = { id: eventDoc.id, ...ed, startDate };
+  }
 
   // Creator
   const creatorDoc = await adminDb.collection("users").doc(teamData.creatorId).get();

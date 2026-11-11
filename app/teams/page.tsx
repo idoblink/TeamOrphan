@@ -25,85 +25,98 @@ export default async function TeamsPage({ searchParams }: TeamsPageProps) {
   const search = searchParams.search || "";
   const urgency = searchParams.urgency || "ALL";
 
-  const teamsSnap = await adminDb.collection("teams").orderBy("createdAt", "desc").get();
-  let rawTeams = teamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  let teamsWithMatches: any[] = [];
 
-  // Enrich teams
-  rawTeams = await Promise.all(
-    rawTeams.map(async (t) => {
-      const eDoc = await adminDb.collection("events").doc(t.eventId).get();
-      const event = eDoc.exists ? { id: eDoc.id, ...eDoc.data() } : null;
+  try {
+    const teamsSnap = await adminDb.collection("teams").orderBy("createdAt", "desc").get();
+    let rawTeams = teamsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
-      const cDoc = await adminDb.collection("users").doc(t.creatorId).get();
-      const creator = cDoc.exists
-        ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar }
-        : null;
+    // Enrich teams
+    rawTeams = await Promise.all(
+      rawTeams.map(async (t) => {
+        try {
+          const eDoc = await adminDb.collection("events").doc(t.eventId).get();
+          if (!eDoc.exists) return null;
+          const ed = eDoc.data()!;
+          const startDate = ed.startDate?.toDate ? ed.startDate.toDate().toISOString() : new Date(ed.startDate).toISOString();
+          const event = { id: eDoc.id, ...ed, startDate };
 
-      const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
-      const members = await Promise.all(
-        membersSnap.docs.map(async (m) => {
-          const md = m.data();
-          const uDoc = await adminDb.collection("users").doc(md.userId).get();
+          const cDoc = await adminDb.collection("users").doc(t.creatorId).get();
+          const creator = cDoc.exists
+            ? { id: cDoc.id, name: cDoc.data()!.name, username: cDoc.data()!.username, avatar: cDoc.data()!.avatar }
+            : null;
+
+          const membersSnap = await adminDb.collection("teamMembers").where("teamId", "==", t.id).get();
+          const members = await Promise.all(
+            membersSnap.docs.map(async (m) => {
+              const md = m.data();
+              const uDoc = await adminDb.collection("users").doc(md.userId).get();
+              return {
+                id: m.id,
+                ...md,
+                user: uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, avatar: uDoc.data()!.avatar } : null,
+              };
+            })
+          );
+
           return {
-            id: m.id,
-            ...md,
-            user: uDoc.exists ? { id: uDoc.id, name: uDoc.data()!.name, avatar: uDoc.data()!.avatar } : null,
+            ...t,
+            event,
+            creator,
+            members,
+            _count: { members: membersSnap.size },
           };
-        })
-      );
-
-      return {
-        ...t,
-        event,
-        creator,
-        members,
-        _count: { members: membersSnap.size },
-      };
-    })
-  );
-
-  rawTeams = rawTeams.filter((t) => t.event !== null);
-
-  if (category !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.category === category);
-  if (mode !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.mode === mode);
-  if (search) {
-    const s = search.toLowerCase();
-    rawTeams = rawTeams.filter(
-      (t) =>
-        t.name?.toLowerCase().includes(s) ||
-        t.description?.toLowerCase().includes(s) ||
-        t.requiredSkills?.toLowerCase().includes(s) ||
-        t.event?.name?.toLowerCase().includes(s)
-    );
-  }
-
-  let teams = rawTeams;
-  if (urgency === "urgent") {
-    const now = new Date().getTime();
-    teams = rawTeams.filter((t) => {
-      const start = t.event.startDate?.toDate ? t.event.startDate.toDate().getTime() : new Date(t.event.startDate).getTime();
-      const cutoff = start - 24 * 60 * 60 * 1000;
-      const remaining = cutoff - now;
-      return remaining > 0 && remaining <= 24 * 60 * 60 * 1000;
-    });
-  }
-
-  const teamsWithMatches = teams.map((team) => {
-    let match = null;
-    if (user) {
-      match = calculateCompatibility(
-        { skills: (user as any).skills, interests: (user as any).interests, location: (user as any).location },
-        {
-          requiredSkills: team.requiredSkills,
-          preferredSkills: team.preferredSkills,
-          category: team.event.category,
-          location: team.event.location,
-          mode: team.event.mode,
+        } catch {
+          return null;
         }
+      })
+    );
+
+    rawTeams = rawTeams.filter((t) => t && t.event);
+
+    if (category !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.category === category);
+    if (mode !== "ALL") rawTeams = rawTeams.filter((t) => t.event?.mode === mode);
+    if (search) {
+      const s = search.toLowerCase();
+      rawTeams = rawTeams.filter(
+        (t) =>
+          t.name?.toLowerCase().includes(s) ||
+          t.description?.toLowerCase().includes(s) ||
+          t.requiredSkills?.toLowerCase().includes(s) ||
+          t.event?.name?.toLowerCase().includes(s)
       );
     }
-    return { team, match };
-  });
+
+    let teams = rawTeams;
+    if (urgency === "urgent") {
+      const now = new Date().getTime();
+      teams = rawTeams.filter((t) => {
+        const start = new Date(t.event.startDate).getTime();
+        const cutoff = start - 24 * 60 * 60 * 1000;
+        const remaining = cutoff - now;
+        return remaining > 0 && remaining <= 24 * 60 * 60 * 1000;
+      });
+    }
+
+    teamsWithMatches = teams.map((team) => {
+      let match = null;
+      if (user) {
+        match = calculateCompatibility(
+          { skills: (user as any).skills, interests: (user as any).interests, location: (user as any).location },
+          {
+            requiredSkills: team.requiredSkills,
+            preferredSkills: team.preferredSkills,
+            category: team.event.category,
+            location: team.event.location,
+            mode: team.event.mode,
+          }
+        );
+      }
+      return { team, match };
+    });
+  } catch (err) {
+    console.error("Teams fetch error:", err);
+  }
 
   const categories = [
     "ALL",

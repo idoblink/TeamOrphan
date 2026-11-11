@@ -20,28 +20,42 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const mode = searchParams.mode || "ALL";
   const search = searchParams.search || "";
 
-  const snap = await adminDb.collection("events").orderBy("startDate", "asc").get();
-  let rawEvents = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  let events: any[] = [];
 
-  if (category !== "ALL") rawEvents = rawEvents.filter((e) => e.category === category);
-  if (mode !== "ALL") rawEvents = rawEvents.filter((e) => e.mode === mode);
-  if (search) {
-    const s = search.toLowerCase();
-    rawEvents = rawEvents.filter(
-      (e) =>
-        e.name?.toLowerCase().includes(s) ||
-        e.description?.toLowerCase().includes(s) ||
-        e.location?.toLowerCase().includes(s)
+  try {
+    const snap = await adminDb.collection("events").orderBy("startDate", "asc").get();
+    let rawEvents = snap.docs.map((d) => {
+      const data = d.data() as any;
+      const startDate = data.startDate?.toDate ? data.startDate.toDate().toISOString() : new Date(data.startDate).toISOString();
+      return { id: d.id, ...data, startDate } as any;
+    });
+
+    if (category !== "ALL") rawEvents = rawEvents.filter((e: any) => e.category === category);
+    if (mode !== "ALL") rawEvents = rawEvents.filter((e: any) => e.mode === mode);
+    if (search) {
+      const s = search.toLowerCase();
+      rawEvents = rawEvents.filter(
+        (e: any) =>
+          e.name?.toLowerCase().includes(s) ||
+          e.description?.toLowerCase().includes(s) ||
+          e.location?.toLowerCase().includes(s)
+      );
+    }
+
+    // Enrich with team counts
+    events = await Promise.all(
+      rawEvents.map(async (event) => {
+        try {
+          const teamsSnap = await adminDb.collection("teams").where("eventId", "==", event.id).get();
+          return { ...event, _count: { teams: teamsSnap.size } };
+        } catch {
+          return { ...event, _count: { teams: 0 } };
+        }
+      })
     );
+  } catch (err) {
+    console.error("Events fetch error:", err);
   }
-
-  // Enrich with team counts
-  const events = await Promise.all(
-    rawEvents.map(async (event) => {
-      const teamsSnap = await adminDb.collection("teams").where("eventId", "==", event.id).get();
-      return { ...event, _count: { teams: teamsSnap.size } };
-    })
-  );
 
   const categories = [
     "ALL",
