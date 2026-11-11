@@ -121,7 +121,7 @@ class RedisDatabase {
           },
           body: JSON.stringify(["GET", REDIS_KEY]),
           cache: "no-store",
-          signal: AbortSignal.timeout(3500),
+          signal: AbortSignal.timeout(15000),
         });
 
         if (res.ok) {
@@ -180,7 +180,8 @@ class RedisDatabase {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(["SET", REDIS_KEY, JSON.stringify(data)]),
-          signal: AbortSignal.timeout(4000),
+          cache: "no-store",
+          signal: AbortSignal.timeout(15000),
         });
 
         if (res.ok) {
@@ -199,6 +200,12 @@ class RedisDatabase {
     });
 
     return globalRef.__teamsync_redis_persist_promise;
+  }
+
+  // Atomically replace all schema state and persist
+  public async saveAll(newData: Schema): Promise<boolean> {
+    globalRef.__teamsync_redis_cache = newData;
+    return this.persist();
   }
 
   collection<K extends keyof Schema>(table: K) {
