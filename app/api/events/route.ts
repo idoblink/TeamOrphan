@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { CreateEventSchema } from "@/lib/validation";
 
@@ -7,13 +7,13 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    await tinydb.sync();
+    await db.sync();
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
     const mode = searchParams.get("mode");
     const search = searchParams.get("search");
 
-    let events = tinydb.collection("events").findMany();
+    let events = db.collection("events").findMany();
 
     if (category && category !== "ALL") {
       events = events.filter((e: any) => e.category === category);
@@ -32,9 +32,9 @@ export async function GET(req: NextRequest) {
     }
 
     const enriched = events.map((event: any) => {
-      const teamsCount = tinydb.collection("teams").count((t: any) => t.eventId === event.id);
-      const orphansCount = tinydb.collection("orphanListings").count((o: any) => o.targetEventId === event.id);
-      const creator = event.createdById ? tinydb.collection("users").findUnique((u: any) => u.id === event.createdById) : null;
+      const teamsCount = db.collection("teams").count((t: any) => t.eventId === event.id);
+      const orphansCount = db.collection("orphanListings").count((o: any) => o.targetEventId === event.id);
+      const creator = event.createdById ? db.collection("users").findUnique((u: any) => u.id === event.createdById) : null;
 
       return {
         ...event,
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await tinydb.sync(true);
+    await db.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
 
     const { name, description, category, startDate, location, mode } = validated.data;
 
-    const event = tinydb.collection("events").insert({
+    const event = db.collection("events").insert({
       name,
       description,
       category,
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       createdById: user.id,
     });
 
-    await tinydb.persist();
+    await db.persist();
 
     return NextResponse.json({ success: true, event });
   } catch (error: any) {

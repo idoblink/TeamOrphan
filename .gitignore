@@ -38,5 +38,5 @@ next-env.d.ts
 prisma/*.db
 prisma/*.db-journal
 
-# TinyDB local runtime data
+# Local runtime data
 /.data/

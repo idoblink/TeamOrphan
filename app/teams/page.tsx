@@ -1,11 +1,10 @@
 import Link from "next/link";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { TeamCard } from "@/components/cards/TeamCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { calculateCompatibility } from "@/lib/matching";
-import { syncDatabaseFromCookies } from "@/lib/cookie-sync";
 import { Users, PlusCircle, Search, Flame } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -22,20 +21,20 @@ interface TeamsPageProps {
 }
 
 export default async function TeamsPage({ searchParams }: TeamsPageProps) {
-  await tinydb.sync();
+  await db.sync();
   const user = await getCurrentUser();
   const category = searchParams.category || "ALL";
   const mode = searchParams.mode || "ALL";
   const search = searchParams.search || "";
   const urgency = searchParams.urgency || "ALL";
 
-  const rawTeams = tinydb.collection("teams").findMany().map((t: any) => {
-    const event = tinydb.collection("events").findUnique((e: any) => e.id === t.eventId);
-    const creator = tinydb.collection("users").findUnique((u: any) => u.id === t.creatorId);
-    const members = tinydb.collection("teamMembers")
+  const rawTeams = db.collection("teams").findMany().map((t: any) => {
+    const event = db.collection("events").findUnique((e: any) => e.id === t.eventId);
+    const creator = db.collection("users").findUnique((u: any) => u.id === t.creatorId);
+    const members = db.collection("teamMembers")
       .findMany((m: any) => m.teamId === t.id)
       .map((m: any) => {
-        const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+        const u = db.collection("users").findUnique((usr: any) => usr.id === m.userId);
         return { id: m.id, ...m, user: u ? { name: u.name, avatar: u.avatar } : null };
       });
 

@@ -1,11 +1,5 @@
-import fs from "fs";
-import path from "path";
-import os from "os";
-
-// Zero-config NoSQL database (TinyDB backed by Redis REST API)
-// Provides instant serverless state sharing across containers and browsers
-// without requiring complex configuration or private keys.
-// Compatible with Upstash Redis, Vercel KV, and local TinyDB fallback.
+// Pure Redis NoSQL Database Client for TeamSync
+// Uses Upstash Redis / Vercel KV REST API. Zero dependencies on local files, TinyDB, or Firestore.
 
 const REDIS_URL =
   process.env.STORAGE_REST_API_URL ||
@@ -22,11 +16,6 @@ const REDIS_TOKEN =
   "gQAAAAAAAwLqAQIgcDFiN2ZiNjlhMmUzZjg0MzVjOWM0MzZjNDlkOGUwMjkxOA";
 
 const REDIS_KEY = "teamsync_nosql_state";
-
-const DATA_DIR = process.env.VERCEL
-  ? path.join(os.tmpdir(), "teamsync-data")
-  : path.join(process.cwd(), ".data");
-const DB_FILE = path.join(DATA_DIR, "db.json");
 
 export interface Schema {
   users: any[];
@@ -89,78 +78,40 @@ export const defaultData: Schema = {
   reports: [],
 };
 
-interface GlobalDBState {
-  __teamsync_db_cache?: Schema;
-  __teamsync_last_sync?: number;
-  __teamsync_sync_promise?: Promise<Schema> | null;
-  __teamsync_persist_promise?: Promise<boolean> | null;
+interface GlobalRedisState {
+  __teamsync_redis_cache?: Schema;
+  __teamsync_redis_last_sync?: number;
+  __teamsync_redis_sync_promise?: Promise<Schema> | null;
+  __teamsync_redis_persist_promise?: Promise<boolean> | null;
 }
 
-const globalRef = globalThis as unknown as GlobalDBState;
+const globalRef = globalThis as unknown as GlobalRedisState;
 
-class TinyDatabase {
-  private ensureDir() {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
-    } catch {
-      // Ignore directory creation errors in strictly transient serverless runtimes
-    }
-  }
-
-  // Synchronous local read from cache or disk
+class RedisDatabase {
+  // Synchronous read from in-memory cache
   public read(): Schema {
-    if (globalRef.__teamsync_db_cache) {
-      return globalRef.__teamsync_db_cache;
+    if (globalRef.__teamsync_redis_cache) {
+      return globalRef.__teamsync_redis_cache;
     }
-
-    this.ensureDir();
-    try {
-      if (fs.existsSync(DB_FILE)) {
-        const content = fs.readFileSync(DB_FILE, "utf8");
-        const parsed = JSON.parse(content);
-        if (parsed && typeof parsed === "object") {
-          globalRef.__teamsync_db_cache = parsed;
-          return parsed;
-        }
-      }
-    } catch {
-      // Fallback to memory defaults
-    }
-
     const fresh = JSON.parse(JSON.stringify(defaultData));
-    globalRef.__teamsync_db_cache = fresh;
+    globalRef.__teamsync_redis_cache = fresh;
     return fresh;
   }
 
-  // Local write to memory cache and disk
-  private writeLocal(data: Schema) {
-    globalRef.__teamsync_db_cache = data;
-    try {
-      this.ensureDir();
-      fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");
-    } catch {
-      // Local write failure shouldn't block execution
-    }
-  }
-
-  // Global cloud synchronization from Redis REST (NoSQL)
+  // Synchronize state from Redis NoSQL store
   public async sync(force = false): Promise<Schema> {
     const now = Date.now();
-    const lastSync = globalRef.__teamsync_last_sync || 0;
+    const lastSync = globalRef.__teamsync_redis_last_sync || 0;
 
-    // Return in-memory cache if fresh (< 1.5 seconds) unless explicitly forced
-    if (!force && globalRef.__teamsync_db_cache && now - lastSync < 1500) {
-      return globalRef.__teamsync_db_cache;
+    if (!force && globalRef.__teamsync_redis_cache && now - lastSync < 1500) {
+      return globalRef.__teamsync_redis_cache;
     }
 
-    // Deduplicate in-flight sync requests
-    if (globalRef.__teamsync_sync_promise) {
-      return globalRef.__teamsync_sync_promise;
+    if (globalRef.__teamsync_redis_sync_promise) {
+      return globalRef.__teamsync_redis_sync_promise;
     }
 
-    globalRef.__teamsync_sync_promise = (async () => {
+    globalRef.__teamsync_redis_sync_promise = (async () => {
       try {
         const res = await fetch(REDIS_URL, {
           method: "POST",
@@ -193,37 +144,34 @@ class TinyDatabase {
               reports: Array.isArray(parsed.reports) ? parsed.reports : [],
             };
 
-            this.writeLocal(merged);
-            globalRef.__teamsync_last_sync = Date.now();
+            globalRef.__teamsync_redis_cache = merged;
+            globalRef.__teamsync_redis_last_sync = Date.now();
             return merged;
           }
         }
       } catch (err) {
-        console.warn("Redis sync warning (falling back to cache):", err);
+        console.warn("Redis sync fallback:", err);
       }
 
       return this.read();
     })().finally(() => {
-      globalRef.__teamsync_sync_promise = null;
+      globalRef.__teamsync_redis_sync_promise = null;
     });
 
-    return globalRef.__teamsync_sync_promise;
+    return globalRef.__teamsync_redis_sync_promise;
   }
 
-  // Persist current state to Redis REST (NoSQL)
+  // Persist state to Redis NoSQL store
   public async persist(): Promise<boolean> {
     const data = this.read();
 
-    // Deduplicate or wait for existing persist
-    if (globalRef.__teamsync_persist_promise) {
+    if (globalRef.__teamsync_redis_persist_promise) {
       try {
-        await globalRef.__teamsync_persist_promise;
-      } catch {
-        // Continue with new persist
-      }
+        await globalRef.__teamsync_redis_persist_promise;
+      } catch {}
     }
 
-    globalRef.__teamsync_persist_promise = (async () => {
+    globalRef.__teamsync_redis_persist_promise = (async () => {
       try {
         const res = await fetch(REDIS_URL, {
           method: "POST",
@@ -236,11 +184,10 @@ class TinyDatabase {
         });
 
         if (res.ok) {
-          globalRef.__teamsync_last_sync = Date.now();
+          globalRef.__teamsync_redis_last_sync = Date.now();
           return true;
         } else {
-          const errText = await res.text();
-          console.error("Redis persist error:", res.status, errText);
+          console.error("Redis persist failed:", res.status, await res.text());
           return false;
         }
       } catch (err) {
@@ -248,10 +195,10 @@ class TinyDatabase {
         return false;
       }
     })().finally(() => {
-      globalRef.__teamsync_persist_promise = null;
+      globalRef.__teamsync_redis_persist_promise = null;
     });
 
-    return globalRef.__teamsync_persist_promise;
+    return globalRef.__teamsync_redis_persist_promise;
   }
 
   collection<K extends keyof Schema>(table: K) {
@@ -286,8 +233,7 @@ class TinyDatabase {
           ...record,
         };
         fullData[table].push(newRecord);
-        self.writeLocal(fullData);
-        // Start background persist immediately
+        globalRef.__teamsync_redis_cache = fullData;
         self.persist().catch(() => {});
         return newRecord;
       },
@@ -300,7 +246,7 @@ class TinyDatabase {
           ...updates,
           updatedAt: new Date().toISOString(),
         };
-        self.writeLocal(fullData);
+        globalRef.__teamsync_redis_cache = fullData;
         self.persist().catch(() => {});
         return fullData[table][idx];
       },
@@ -317,7 +263,7 @@ class TinyDatabase {
           }
           return item;
         });
-        self.writeLocal(fullData);
+        globalRef.__teamsync_redis_cache = fullData;
         self.persist().catch(() => {});
         return count;
       },
@@ -326,14 +272,14 @@ class TinyDatabase {
         const idx = fullData[table].findIndex((item: any) => item.id === id);
         if (idx === -1) return false;
         fullData[table].splice(idx, 1);
-        self.writeLocal(fullData);
+        globalRef.__teamsync_redis_cache = fullData;
         self.persist().catch(() => {});
         return true;
       },
       deleteMany(predicate: (item: Schema[K][number]) => boolean) {
         const fullData = self.read();
         fullData[table] = fullData[table].filter((item: any) => !predicate(item));
-        self.writeLocal(fullData);
+        globalRef.__teamsync_redis_cache = fullData;
         self.persist().catch(() => {});
         return true;
       },
@@ -343,8 +289,10 @@ class TinyDatabase {
 
 declare global {
   // eslint-disable-next-line no-var
-  var _tinydb: TinyDatabase | undefined;
+  var _redisDb: RedisDatabase | undefined;
 }
 
-export const tinydb = global._tinydb || (global._tinydb = new TinyDatabase());
-export default tinydb;
+export const redisDb = global._redisDb || (global._redisDb = new RedisDatabase());
+export const db = redisDb;
+export const tinydb = redisDb; // Backwards-compatible alias
+export default redisDb;

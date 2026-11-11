@@ -1,4 +1,6 @@
-import { tinydb } from "./tinydb";
+import { redisDb, db, defaultData } from "./redis";
+import type { Schema } from "./redis";
 
-export { tinydb as db, tinydb };
-export default tinydb;
+export { redisDb, db, defaultData };
+export type { Schema };
+export default redisDb;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { setSessionCookie, saveAccountToRegistry } from "@/lib/auth";
 import { RegisterSchema } from "@/lib/validation";
 
@@ -16,19 +16,19 @@ export async function POST(req: NextRequest) {
     const { name, email, password, username, college, location, skills, interests, bio } =
       validated.data;
 
-    await tinydb.sync(true);
+    await db.sync(true);
 
     const emailLower = email.toLowerCase();
     const usernameLower = username.toLowerCase();
 
     // Check existing email
-    const existingEmail = tinydb.collection("users").findFirst((u: any) => u.email?.toLowerCase() === emailLower);
+    const existingEmail = db.collection("users").findFirst((u: any) => u.email?.toLowerCase() === emailLower);
     if (existingEmail) {
       return NextResponse.json({ error: "Email already registered" }, { status: 400 });
     }
 
     // Check existing username
-    const existingUsername = tinydb.collection("users").findFirst((u: any) => u.username?.toLowerCase() === usernameLower);
+    const existingUsername = db.collection("users").findFirst((u: any) => u.username?.toLowerCase() === usernameLower);
     if (existingUsername) {
       return NextResponse.json({ error: "Username already taken" }, { status: 400 });
     }
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     const bcrypt = await import("bcryptjs");
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const user = tinydb.collection("users").insert({
+    const user = db.collection("users").insert({
       name,
       email: emailLower,
       username: usernameLower,
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
       isSuspended: false,
     });
 
-    await tinydb.persist();
+    await db.persist();
 
     await setSessionCookie({
       userId: user.id,

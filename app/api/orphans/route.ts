@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { CreateOrphanListingSchema } from "@/lib/validation";
-import { saveOrphanToCookie, syncDatabaseFromCookies } from "@/lib/cookie-sync";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    await tinydb.sync();
+    await db.sync();
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
     const mode = searchParams.get("mode");
     const search = searchParams.get("search");
     const skill = searchParams.get("skill");
 
-    let orphans = tinydb.collection("orphanListings").findMany((o: any) => o.status === "ACTIVE");
+    let orphans = db.collection("orphanListings").findMany((o: any) => o.status === "ACTIVE");
 
     if (mode && mode !== "ALL") {
       orphans = orphans.filter((o: any) => o.mode === mode);
@@ -33,8 +32,8 @@ export async function GET(req: NextRequest) {
     }
 
     const enriched = orphans.map((o: any) => {
-      const user = tinydb.collection("users").findUnique((u: any) => u.id === o.userId);
-      const targetEvent = o.targetEventId ? tinydb.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
+      const user = db.collection("users").findUnique((u: any) => u.id === o.userId);
+      const targetEvent = o.targetEventId ? db.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
       return { ...o, user, targetEvent };
     });
 
@@ -52,7 +51,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await tinydb.sync(true);
+    await db.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
@@ -71,7 +70,7 @@ export async function POST(req: NextRequest) {
     const { targetEventId, targetCategory, skills, experience, availability, location, mode, bio } =
       validated.data;
 
-    const existing = tinydb.collection("orphanListings").findFirst(
+    const existing = db.collection("orphanListings").findFirst(
       (o: any) => o.userId === user.id && o.status === "ACTIVE" && (!targetEventId || o.targetEventId === targetEventId)
     );
 
@@ -86,19 +85,19 @@ export async function POST(req: NextRequest) {
     };
 
     if (existing) {
-      const updated = tinydb.collection("orphanListings").update(existing.id, payload);
-      await tinydb.persist();
+      const updated = db.collection("orphanListings").update(existing.id, payload);
+      await db.persist();
       return NextResponse.json({ success: true, orphan: updated });
     }
 
-    const orphan = tinydb.collection("orphanListings").insert({
+    const orphan = db.collection("orphanListings").insert({
       userId: user.id,
       targetEventId: targetEventId || null,
       ...payload,
       status: "ACTIVE",
     });
 
-    await tinydb.persist();
+    await db.persist();
 
     return NextResponse.json({ success: true, orphan });
   } catch (error: any) {

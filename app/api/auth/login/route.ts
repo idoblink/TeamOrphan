@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { setSessionCookie, getRegisteredAccounts } from "@/lib/auth";
 import { LoginSchema } from "@/lib/validation";
 
@@ -15,9 +15,9 @@ export async function POST(req: NextRequest) {
     const { login, password } = validated.data;
     const loginLower = login.toLowerCase();
 
-    await tinydb.sync(true);
+    await db.sync(true);
 
-    let user = tinydb.collection("users").findFirst((u: any) =>
+    let user = db.collection("users").findFirst((u: any) =>
       u.email?.toLowerCase() === loginLower || u.username?.toLowerCase() === loginLower
     );
 
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
         a.email?.toLowerCase() === loginLower || a.username?.toLowerCase() === loginLower
       );
       if (found) {
-        user = tinydb.collection("users").insert(found);
+        user = db.collection("users").insert(found);
       }
     }
 

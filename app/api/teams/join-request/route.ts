@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { JoinRequestSchema } from "@/lib/validation";
 import { checkRecruitmentAllowed } from "@/lib/cutoff";
-import { saveJoinRequestToCookie, saveMemberToCookie, syncDatabaseFromCookies } from "@/lib/cookie-sync";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    await tinydb.sync(true);
+    await db.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Please log in to join a team" }, { status: 401 });
@@ -27,12 +26,12 @@ export async function POST(req: NextRequest) {
 
     const { teamId, message } = validated.data;
 
-    const team = tinydb.collection("teams").findUnique((t: any) => t.id === teamId);
+    const team = db.collection("teams").findUnique((t: any) => t.id === teamId);
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
 
-    const event = tinydb.collection("events").findUnique((e: any) => e.id === team.eventId);
+    const event = db.collection("events").findUnique((e: any) => e.id === team.eventId);
     if (!event) {
       return NextResponse.json({ error: "Event not found" }, { status: 404 });
     }
@@ -46,7 +45,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "You cannot request to join your own team." }, { status: 400 });
     }
 
-    const members = tinydb.collection("teamMembers").findMany((m: any) => m.teamId === teamId);
+    const members = db.collection("teamMembers").findMany((m: any) => m.teamId === teamId);
     if (members.some((m: any) => m.userId === user.id)) {
       return NextResponse.json({ error: "You are already a member of this team." }, { status: 400 });
     }
@@ -55,7 +54,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This team is already full." }, { status: 400 });
     }
 
-    const existing = tinydb.collection("joinRequests").findFirst(
+    const existing = db.collection("joinRequests").findFirst(
       (jr: any) => jr.teamId === teamId && jr.userId === user.id
     );
 
@@ -64,12 +63,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "You already have a pending join request for this team." }, { status: 400 });
       }
       if (existing.status === "REJECTED") {
-        const updated = tinydb.collection("joinRequests").update(existing.id, {
+        const updated = db.collection("joinRequests").update(existing.id, {
           message: message || null,
           status: "PENDING",
         });
 
-        tinydb.collection("notifications").insert({
+        db.collection("notifications").insert({
           userId: team.creatorId,
           type: "JOIN_REQUEST",
           title: `New Join Request: ${team.name}`,
@@ -82,14 +81,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const jr = tinydb.collection("joinRequests").insert({
+    const jr = db.collection("joinRequests").insert({
       teamId,
       userId: user.id,
       message: message || null,
       status: "PENDING",
     });
 
-    tinydb.collection("notifications").insert({
+    db.collection("notifications").insert({
       userId: team.creatorId,
       type: "JOIN_REQUEST",
       title: `New Join Request: ${team.name}`,
@@ -98,7 +97,7 @@ export async function POST(req: NextRequest) {
       read: false,
     });
 
-    await tinydb.persist();
+    await db.persist();
 
     return NextResponse.json({
       success: true,
@@ -123,7 +122,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    await tinydb.sync(true);
+    await db.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -135,12 +134,12 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Invalid action or request ID" }, { status: 400 });
     }
 
-    const jr = tinydb.collection("joinRequests").findUnique((r: any) => r.id === requestId);
+    const jr = db.collection("joinRequests").findUnique((r: any) => r.id === requestId);
     if (!jr) {
       return NextResponse.json({ error: "Join request not found" }, { status: 404 });
     }
 
-    const team = tinydb.collection("teams").findUnique((t: any) => t.id === jr.teamId);
+    const team = db.collection("teams").findUnique((t: any) => t.id === jr.teamId);
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
@@ -148,7 +147,7 @@ export async function PATCH(req: NextRequest) {
     const isLeader =
       team.creatorId === user.id ||
       user.role === "ADMIN" ||
-      tinydb.collection("teamMembers").findFirst(
+      db.collection("teamMembers").findFirst(
         (m: any) => m.teamId === jr.teamId && m.userId === user.id && m.role === "LEADER"
       );
 
@@ -157,9 +156,9 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (action === "REJECT") {
-      tinydb.collection("joinRequests").update(requestId, { status: "REJECTED" });
+      db.collection("joinRequests").update(requestId, { status: "REJECTED" });
 
-      tinydb.collection("notifications").insert({
+      db.collection("notifications").insert({
         userId: jr.userId,
         type: "REQUEST_REJECTED",
         title: "Join Request Update",
@@ -168,12 +167,12 @@ export async function PATCH(req: NextRequest) {
         read: false,
       });
 
-      await tinydb.persist();
+      await db.persist();
       return NextResponse.json({ success: true, status: "REJECTED" });
     }
 
     // ACCEPT: verify event hasn't started yet
-    const event = tinydb.collection("events").findUnique((e: any) => e.id === team.eventId);
+    const event = db.collection("events").findUnique((e: any) => e.id === team.eventId);
     if (event) {
       const eventStart = new Date(event.startDate).getTime();
       if (Date.now() >= eventStart) {
@@ -181,7 +180,7 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    const members = tinydb.collection("teamMembers").findMany((m: any) => m.teamId === jr.teamId);
+    const members = db.collection("teamMembers").findMany((m: any) => m.teamId === jr.teamId);
     if (members.length >= team.maxMembers) {
       return NextResponse.json({ error: "This team is already at maximum capacity." }, { status: 400 });
     }
@@ -193,19 +192,19 @@ export async function PATCH(req: NextRequest) {
       role: "MEMBER",
     };
 
-    tinydb.collection("teamMembers").insert(newMember);
-    tinydb.collection("joinRequests").update(requestId, { status: "ACCEPTED" });
+    db.collection("teamMembers").insert(newMember);
+    db.collection("joinRequests").update(requestId, { status: "ACCEPTED" });
 
     if (members.length + 1 >= team.maxMembers) {
-      tinydb.collection("teams").update(jr.teamId, { status: "FULL" });
+      db.collection("teams").update(jr.teamId, { status: "FULL" });
     }
 
-    tinydb.collection("orphanListings").updateMany(
+    db.collection("orphanListings").updateMany(
       (o: any) => o.userId === jr.userId && o.status === "ACTIVE" && o.targetEventId === team.eventId,
       { status: "MATCHED" }
     );
 
-    tinydb.collection("notifications").insert({
+    db.collection("notifications").insert({
       userId: jr.userId,
       type: "REQUEST_ACCEPTED",
       title: "🎉 Request Accepted!",
@@ -214,9 +213,9 @@ export async function PATCH(req: NextRequest) {
       read: false,
     });
 
-    await tinydb.persist();
+    await db.persist();
 
-    const applicantUser = tinydb.collection("users").findUnique((u: any) => u.id === jr.userId);
+    const applicantUser = db.collection("users").findUnique((u: any) => u.id === jr.userId);
 
     return NextResponse.json({
       success: true,

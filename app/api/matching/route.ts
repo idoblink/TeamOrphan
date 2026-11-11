@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateCompatibility } from "@/lib/matching";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    await tinydb.sync();
+    await db.sync();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ matches: [] });
@@ -18,18 +18,18 @@ export async function GET(req: NextRequest) {
     const u = user as any;
 
     if (type === "teams") {
-      const teams = tinydb.collection("teams")
+      const teams = db.collection("teams")
         .findMany((t: any) => t.status === "OPEN" && t.creatorId !== user.id)
         .filter((t: any) => {
-          const isMember = tinydb.collection("teamMembers").findFirst(
+          const isMember = db.collection("teamMembers").findFirst(
             (m: any) => m.teamId === t.id && m.userId === user.id
           );
           return !isMember;
         })
         .map((team: any) => {
-          const event = tinydb.collection("events").findUnique((e: any) => e.id === team.eventId);
-          const creator = tinydb.collection("users").findUnique((usr: any) => usr.id === team.creatorId);
-          const members = tinydb.collection("teamMembers").findMany((m: any) => m.teamId === team.id);
+          const event = db.collection("events").findUnique((e: any) => e.id === team.eventId);
+          const creator = db.collection("users").findUnique((usr: any) => usr.id === team.creatorId);
+          const members = db.collection("teamMembers").findMany((m: any) => m.teamId === team.id);
           return {
             ...team,
             event,
@@ -56,18 +56,18 @@ export async function GET(req: NextRequest) {
       matchedTeams.sort((a: any, b: any) => b.match.score - a.match.score);
       return NextResponse.json({ matches: matchedTeams });
     } else {
-      const orphans = tinydb.collection("orphanListings")
+      const orphans = db.collection("orphanListings")
         .findMany((o: any) => o.status === "ACTIVE" && o.userId !== user.id)
         .map((o: any) => {
-          const orphanUser = tinydb.collection("users").findUnique((usr: any) => usr.id === o.userId);
-          const targetEvent = o.targetEventId ? tinydb.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
+          const orphanUser = db.collection("users").findUnique((usr: any) => usr.id === o.userId);
+          const targetEvent = o.targetEventId ? db.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
           return { ...o, user: orphanUser, targetEvent };
         });
 
-      const userTeams = tinydb.collection("teams")
+      const userTeams = db.collection("teams")
         .findMany((t: any) => t.creatorId === user.id && t.status === "OPEN")
         .map((t: any) => {
-          const event = tinydb.collection("events").findUnique((e: any) => e.id === t.eventId);
+          const event = db.collection("events").findUnique((e: any) => e.id === t.eventId);
           return { ...t, event };
         })
         .filter((t: any) => t.event !== null);

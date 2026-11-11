@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { EventCard } from "@/components/cards/EventCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
@@ -16,12 +16,12 @@ interface EventsPageProps {
 }
 
 export default async function EventsPage({ searchParams }: EventsPageProps) {
-  await tinydb.sync();
+  await db.sync();
   const category = searchParams.category || "ALL";
   const mode = searchParams.mode || "ALL";
   const search = searchParams.search || "";
 
-  let rawEvents = tinydb.collection("events").findMany();
+  let rawEvents = db.collection("events").findMany();
 
   if (category !== "ALL") rawEvents = rawEvents.filter((e: any) => e.category === category);
   if (mode !== "ALL") rawEvents = rawEvents.filter((e: any) => e.mode === mode);
@@ -36,7 +36,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   }
 
   const events = rawEvents.map((event: any) => {
-    const teamsCount = tinydb.collection("teams").count((t: any) => t.eventId === event.id);
+    const teamsCount = db.collection("teams").count((t: any) => t.eventId === event.id);
     return { ...event, _count: { teams: teamsCount } };
   });
 

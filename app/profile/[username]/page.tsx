@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateCompatibility } from "@/lib/matching";
 import { ProfileClient } from "./ProfileClient";
@@ -13,13 +13,13 @@ export default async function ProfilePage({
 }) {
   const currentUser = await getCurrentUser();
 
-  await tinydb.sync();
-  let profileUserData = tinydb.collection("users").findFirst(
+  await db.sync();
+  let profileUserData = db.collection("users").findFirst(
     (u: any) => u.username?.toLowerCase() === params.username?.toLowerCase()
   );
   if (!profileUserData) {
-    await tinydb.sync(true);
-    profileUserData = tinydb.collection("users").findFirst(
+    await db.sync(true);
+    profileUserData = db.collection("users").findFirst(
       (u: any) => u.username?.toLowerCase() === params.username?.toLowerCase()
     );
   }
@@ -28,22 +28,22 @@ export default async function ProfilePage({
     notFound();
   }
 
-  const memberships = tinydb.collection("teamMembers")
+  const memberships = db.collection("teamMembers")
     .findMany((m: any) => m.userId === profileUserData.id)
     .map((m: any) => {
-      const teamData = tinydb.collection("teams").findUnique((t: any) => t.id === m.teamId);
+      const teamData = db.collection("teams").findUnique((t: any) => t.id === m.teamId);
       let team = null;
       if (teamData) {
-        const event = tinydb.collection("events").findUnique((e: any) => e.id === teamData.eventId);
+        const event = db.collection("events").findUnique((e: any) => e.id === teamData.eventId);
         team = { ...teamData, event };
       }
       return { ...m, team };
     });
 
-  const createdTeams = tinydb.collection("teams")
+  const createdTeams = db.collection("teams")
     .findMany((t: any) => t.creatorId === profileUserData.id)
     .map((t: any) => {
-      const event = tinydb.collection("events").findUnique((e: any) => e.id === t.eventId);
+      const event = db.collection("events").findUnique((e: any) => e.id === t.eventId);
       return { ...t, event };
     });
 

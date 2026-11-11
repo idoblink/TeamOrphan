@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { CreateTeamSchema } from "@/lib/validation";
 import { checkRecruitmentAllowed } from "@/lib/cutoff";
-import { saveTeamToCookie, saveMemberToCookie, syncDatabaseFromCookies } from "@/lib/cookie-sync";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    await tinydb.sync();
+    await db.sync();
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
     const mode = searchParams.get("mode");
@@ -17,16 +16,16 @@ export async function GET(req: NextRequest) {
     const urgency = searchParams.get("urgency");
     const skill = searchParams.get("skill");
 
-    const teamsRaw = tinydb.collection("teams").findMany();
+    const teamsRaw = db.collection("teams").findMany();
 
     // Enrich teams
     const enriched = teamsRaw.map((team: any) => {
-      const event = tinydb.collection("events").findUnique((e: any) => e.id === team.eventId);
-      const creator = tinydb.collection("users").findUnique((u: any) => u.id === team.creatorId);
-      const members = tinydb.collection("teamMembers")
+      const event = db.collection("events").findUnique((e: any) => e.id === team.eventId);
+      const creator = db.collection("users").findUnique((u: any) => u.id === team.creatorId);
+      const members = db.collection("teamMembers")
         .findMany((m: any) => m.teamId === team.id)
         .map((m: any) => {
-          const user = tinydb.collection("users").findUnique((u: any) => u.id === m.userId);
+          const user = db.collection("users").findUnique((u: any) => u.id === m.userId);
           return { ...m, user };
         });
 
@@ -86,7 +85,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await tinydb.sync(true);
+    await db.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
@@ -105,7 +104,7 @@ export async function POST(req: NextRequest) {
     const { name, eventId, maxMembers, description, requiredSkills, preferredSkills, contactInfo } =
       validated.data;
 
-    const event = tinydb.collection("events").findUnique((e: any) => e.id === eventId);
+    const event = db.collection("events").findUnique((e: any) => e.id === eventId);
     if (!event) {
       return NextResponse.json({ error: "Event not found" }, { status: 404 });
     }
@@ -115,7 +114,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: cutoffCheck.reason }, { status: 400 });
     }
 
-    const team = tinydb.collection("teams").insert({
+    const team = db.collection("teams").insert({
       name,
       eventId,
       creatorId: user.id,
@@ -127,13 +126,13 @@ export async function POST(req: NextRequest) {
       status: "OPEN",
     });
 
-    const member = tinydb.collection("teamMembers").insert({
+    const member = db.collection("teamMembers").insert({
       teamId: team.id,
       userId: user.id,
       role: "LEADER",
     });
 
-    await tinydb.persist();
+    await db.persist();
 
     return NextResponse.json({ success: true, team: { ...team, event } });
   } catch (error: any) {

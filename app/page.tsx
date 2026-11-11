@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { TeamCard } from "@/components/cards/TeamCard";
@@ -25,19 +25,19 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  await tinydb.sync();
-  const totalMemberships = tinydb.collection("teamMembers").count();
-  const totalActiveTeams = tinydb.collection("teams").count((t: any) => t.status === "OPEN");
-  const totalEvents = tinydb.collection("events").count();
+  await db.sync();
+  const totalMemberships = db.collection("teamMembers").count();
+  const totalActiveTeams = db.collection("teams").count((t: any) => t.status === "OPEN");
+  const totalEvents = db.collection("events").count();
 
-  const activeTeamsRaw = tinydb.collection("teams").findMany((t: any) => t.status === "OPEN").slice(0, 6);
+  const activeTeamsRaw = db.collection("teams").findMany((t: any) => t.status === "OPEN").slice(0, 6);
   const activeTeams = activeTeamsRaw.map((t: any) => {
-    const event = tinydb.collection("events").findUnique((e: any) => e.id === t.eventId);
-    const creator = tinydb.collection("users").findUnique((u: any) => u.id === t.creatorId);
-    const members = tinydb.collection("teamMembers")
+    const event = db.collection("events").findUnique((e: any) => e.id === t.eventId);
+    const creator = db.collection("users").findUnique((u: any) => u.id === t.creatorId);
+    const members = db.collection("teamMembers")
       .findMany((m: any) => m.teamId === t.id)
       .map((m: any) => {
-        const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+        const u = db.collection("users").findUnique((usr: any) => usr.id === m.userId);
         return { id: m.id, ...m, user: u ? { name: u.name, avatar: u.avatar } : null };
       });
 
@@ -53,12 +53,12 @@ export default async function HomePage() {
   const featuredTeam = activeTeams[0] || null;
   const featuredSkills = featuredTeam ? parseJsonArray(featuredTeam.requiredSkills) : [];
 
-  const activeOrphans = tinydb.collection("orphanListings")
+  const activeOrphans = db.collection("orphanListings")
     .findMany((o: any) => o.status === "ACTIVE")
     .slice(0, 3)
     .map((o: any) => {
-      const user = tinydb.collection("users").findUnique((u: any) => u.id === o.userId);
-      const targetEvent = o.targetEventId ? tinydb.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
+      const user = db.collection("users").findUnique((u: any) => u.id === o.userId);
+      const targetEvent = o.targetEventId ? db.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
       return { ...o, user, targetEvent };
     });
 

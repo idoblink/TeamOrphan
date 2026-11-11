@@ -1,12 +1,11 @@
 import Link from "next/link";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { TeamCard } from "@/components/cards/TeamCard";
 import { OrphanCard } from "@/components/cards/OrphanCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { calculateCompatibility } from "@/lib/matching";
-import { syncDatabaseFromCookies } from "@/lib/cookie-sync";
 import { Search, Filter, Flame, Users, Sparkles, Inbox } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +24,7 @@ interface DiscoverPageProps {
 }
 
 export default async function DiscoverPage({ searchParams }: DiscoverPageProps) {
-  await tinydb.sync();
+  await db.sync();
   const user = await getCurrentUser();
   const activeTab = searchParams.tab === "orphans" ? "orphans" : "teams";
   const search = searchParams.search || "";
@@ -35,13 +34,13 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
   const skill = searchParams.skill || "";
 
   // 1. Fetch and filter Teams
-  let rawTeams = tinydb.collection("teams").findMany().map((team: any) => {
-    const event = tinydb.collection("events").findUnique((e: any) => e.id === team.eventId);
-    const creator = tinydb.collection("users").findUnique((u: any) => u.id === team.creatorId);
-    const members = tinydb.collection("teamMembers")
+  let rawTeams = db.collection("teams").findMany().map((team: any) => {
+    const event = db.collection("events").findUnique((e: any) => e.id === team.eventId);
+    const creator = db.collection("users").findUnique((u: any) => u.id === team.creatorId);
+    const members = db.collection("teamMembers")
       .findMany((m: any) => m.teamId === team.id)
       .map((m: any) => {
-        const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+        const u = db.collection("users").findUnique((usr: any) => usr.id === m.userId);
         return { id: m.id, ...m, user: u ? { name: u.name, avatar: u.avatar } : null };
       });
     return {
@@ -89,11 +88,11 @@ export default async function DiscoverPage({ searchParams }: DiscoverPageProps) 
   });
 
   // 2. Fetch and filter Orphan Listings
-  let rawOrphans = tinydb.collection("orphanListings")
+  let rawOrphans = db.collection("orphanListings")
     .findMany((o: any) => o.status === "ACTIVE")
     .map((o: any) => {
-      const orphanUser = tinydb.collection("users").findUnique((u: any) => u.id === o.userId);
-      const targetEvent = o.targetEventId ? tinydb.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
+      const orphanUser = db.collection("users").findUnique((u: any) => u.id === o.userId);
+      const targetEvent = o.targetEventId ? db.collection("events").findUnique((e: any) => e.id === o.targetEventId) : null;
       return {
         ...o,
         user: orphanUser ? {

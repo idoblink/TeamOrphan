@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 
 export async function GET() {
@@ -9,11 +9,11 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const teams = tinydb.collection("teams").findMany().map((t: any) => {
-      const event = tinydb.collection("events").findUnique((e: any) => e.id === t.eventId);
-      const creator = tinydb.collection("users").findUnique((u: any) => u.id === t.creatorId);
-      const membersCount = tinydb.collection("teamMembers").count((m: any) => m.teamId === t.id);
-      const reportsCount = tinydb.collection("reports").count((r: any) => r.teamId === t.id);
+    const teams = db.collection("teams").findMany().map((t: any) => {
+      const event = db.collection("events").findUnique((e: any) => e.id === t.eventId);
+      const creator = db.collection("users").findUnique((u: any) => u.id === t.creatorId);
+      const membersCount = db.collection("teamMembers").count((m: any) => m.teamId === t.id);
+      const reportsCount = db.collection("reports").count((r: any) => r.teamId === t.id);
 
       return {
         ...t,
@@ -38,7 +38,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const { teamId, status } = await req.json();
-    tinydb.collection("teams").update(teamId, { status });
+    db.collection("teams").update(teamId, { status });
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

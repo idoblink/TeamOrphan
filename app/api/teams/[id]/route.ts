@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -9,32 +9,32 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    await tinydb.sync();
+    await db.sync();
     const user = await getCurrentUser();
 
-    let team = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+    let team = db.collection("teams").findUnique((t: any) => t.id === params.id);
     if (!team) {
-      await tinydb.sync(true);
-      team = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+      await db.sync(true);
+      team = db.collection("teams").findUnique((t: any) => t.id === params.id);
     }
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
 
-    const event = tinydb.collection("events").findUnique((e: any) => e.id === team.eventId);
-    const creator = tinydb.collection("users").findUnique((u: any) => u.id === team.creatorId);
+    const event = db.collection("events").findUnique((e: any) => e.id === team.eventId);
+    const creator = db.collection("users").findUnique((u: any) => u.id === team.creatorId);
 
-    const members = tinydb.collection("teamMembers")
+    const members = db.collection("teamMembers")
       .findMany((m: any) => m.teamId === params.id)
       .map((m: any) => {
-        const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+        const u = db.collection("users").findUnique((usr: any) => usr.id === m.userId);
         return { ...m, user: u };
       });
 
-    const joinRequests = tinydb.collection("joinRequests")
+    const joinRequests = db.collection("joinRequests")
       .findMany((jr: any) => jr.teamId === params.id)
       .map((jr: any) => {
-        const u = tinydb.collection("users").findUnique((usr: any) => usr.id === jr.userId);
+        const u = db.collection("users").findUnique((usr: any) => usr.id === jr.userId);
         return { ...jr, user: u };
       });
 
@@ -65,13 +65,13 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    await tinydb.sync(true);
+    await db.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const team = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+    const team = db.collection("teams").findUnique((t: any) => t.id === params.id);
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
@@ -80,11 +80,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Only team leader or admin can delete this team" }, { status: 403 });
     }
 
-    tinydb.collection("teams").delete(params.id);
-    tinydb.collection("teamMembers").deleteMany((m: any) => m.teamId === params.id);
-    tinydb.collection("joinRequests").deleteMany((jr: any) => jr.teamId === params.id);
+    db.collection("teams").delete(params.id);
+    db.collection("teamMembers").deleteMany((m: any) => m.teamId === params.id);
+    db.collection("joinRequests").deleteMany((jr: any) => jr.teamId === params.id);
 
-    await tinydb.persist();
+    await db.persist();
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Team delete error:", error);

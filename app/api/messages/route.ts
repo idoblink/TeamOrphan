@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { MessageSchema } from "@/lib/validation";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    await tinydb.sync();
+    await db.sync();
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     const otherUserId = searchParams.get("otherUserId");
 
     if (otherUserId) {
-      const messages = tinydb.collection("messages")
+      const messages = db.collection("messages")
         .findMany((m: any) =>
           (m.senderId === user.id && m.receiverId === otherUserId) ||
           (m.senderId === otherUserId && m.receiverId === user.id)
@@ -25,19 +25,19 @@ export async function GET(req: NextRequest) {
         .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
       // Mark received as read
-      tinydb.collection("messages").updateMany(
+      db.collection("messages").updateMany(
         (m: any) => m.senderId === otherUserId && m.receiverId === user.id && !m.read,
         { read: true }
       );
 
-      const senderProfile = tinydb.collection("users").findUnique((u: any) => u.id === user.id) || {
+      const senderProfile = db.collection("users").findUnique((u: any) => u.id === user.id) || {
         id: user.id,
         name: (user as any).name || "You",
         username: (user as any).username || "me",
         avatar: (user as any).avatar || null,
       };
 
-      let receiverProfile = tinydb.collection("users").findUnique((u: any) => u.id === otherUserId);
+      let receiverProfile = db.collection("users").findUnique((u: any) => u.id === otherUserId);
       if (!receiverProfile) {
         receiverProfile = {
           id: otherUserId,
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     }
 
     // All conversations
-    const userMessages = tinydb.collection("messages")
+    const userMessages = db.collection("messages")
       .findMany((m: any) => m.senderId === user.id || m.receiverId === user.id)
       .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
     for (const msg of userMessages) {
       const contactId = msg.senderId === user.id ? msg.receiverId : msg.senderId;
       if (!contactsMap.has(contactId)) {
-        let contact = tinydb.collection("users").findUnique((u: any) => u.id === contactId);
+        let contact = db.collection("users").findUnique((u: any) => u.id === contactId);
         if (!contact) {
           contact = {
             id: contactId,
@@ -106,7 +106,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await tinydb.sync(true);
+    await db.sync(true);
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -128,14 +128,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Cannot message yourself" }, { status: 400 });
     }
 
-    const message = tinydb.collection("messages").insert({
+    const message = db.collection("messages").insert({
       senderId: user.id,
       receiverId,
       content,
       read: false,
     });
 
-    tinydb.collection("notifications").insert({
+    db.collection("notifications").insert({
       userId: receiverId,
       type: "MESSAGE",
       title: `New message from ${(user as any).name || "a builder"}`,
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
       read: false,
     });
 
-    await tinydb.persist();
+    await db.persist();
 
     return NextResponse.json({
       success: true,

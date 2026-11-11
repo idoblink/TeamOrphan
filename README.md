@@ -17,7 +17,7 @@
 
 <br/>
 
-A full-stack, neo-brutalist web application designed for students, developers, competitive programmers, and participants in hackathons, esports, robotics arenas, and college activities. **TeamSync – Event-Based Team Formation and Matching System** connects incomplete teams with available talent, powers intelligent compatibility calculations, and enforces a strict, server-verified 24-hour recruitment freeze before event kickoff backed by a fast, zero-config NoSQL database (TinyDB & Redis).
+A full-stack, neo-brutalist web application designed for students, developers, competitive programmers, and participants in hackathons, esports, robotics arenas, and college activities. **TeamSync – Event-Based Team Formation and Matching System** connects incomplete teams with available talent, powers intelligent compatibility calculations, and enforces a strict, server-verified 24-hour recruitment freeze before event kickoff backed by a fast, zero-config NoSQL database (Redis).
 
 <br/>
 
@@ -25,7 +25,7 @@ A full-stack, neo-brutalist web application designed for students, developers, c
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react&logoColor=black)](https://reactjs.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![NoSQL](https://img.shields.io/badge/Database-TinyDB%20%2F%20Redis%20NoSQL-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
+[![NoSQL](https://img.shields.io/badge/Database-Redis%20NoSQL-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
 [![Zod](https://img.shields.io/badge/Validation-Zod%203.23-3E67B1?style=flat-square)](https://zod.dev/)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen?style=flat-square)](LICENSE)
 
@@ -64,8 +64,8 @@ flowchart TD
     end
 
     subgraph Data_Layer [NoSQL Persistence Layer]
-        C4 & M1 & M3 --> DB_CLIENT["TinyDB & Redis REST Client"]
-        DB_CLIENT --> DB[("NoSQL Key-Value Store (Redis / TinyDB)")]
+        C4 & M1 & M3 --> DB_CLIENT["Redis REST Client"]
+        DB_CLIENT --> DB[("NoSQL Key-Value Store (Redis)")]
     end
 ```
 
@@ -189,7 +189,7 @@ TeamSync/
 │   ├── auth.ts                      # JWT and session management
 │   ├── cutoff.ts                    # 24-hour protocol validator
 │   ├── db.ts                        # Unified database export
-│   ├── tinydb.ts                   # Zero-config NoSQL database (TinyDB & Redis)
+│   ├── redis.ts                     # Zero-config NoSQL database (Redis)
 │   ├── matching.ts                  # Compatibility scoring engine
 │   ├── utils.ts                     # Utility helpers
 │   └── validation.ts                # Zod schemas

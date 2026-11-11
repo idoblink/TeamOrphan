@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { TeamCard } from "@/components/cards/TeamCard";
 import { OrphanCard } from "@/components/cards/OrphanCard";
@@ -17,32 +17,32 @@ export default async function EventDetailPage({
 }: {
   params: { id: string };
 }) {
-  await tinydb.sync(true);
+  await db.sync(true);
   const user = await getCurrentUser();
-  let event = tinydb.collection("events").findUnique((e: any) => e.id === params.id);
+  let event = db.collection("events").findUnique((e: any) => e.id === params.id);
   if (!event) {
-    await tinydb.sync(true);
-    event = tinydb.collection("events").findUnique((e: any) => e.id === params.id);
+    await db.sync(true);
+    event = db.collection("events").findUnique((e: any) => e.id === params.id);
   }
   if (!event) notFound();
 
-  const teams = tinydb.collection("teams")
+  const teams = db.collection("teams")
     .findMany((t: any) => t.eventId === params.id)
     .map((t: any) => {
-      const creator = tinydb.collection("users").findUnique((u: any) => u.id === t.creatorId);
-      const members = tinydb.collection("teamMembers")
+      const creator = db.collection("users").findUnique((u: any) => u.id === t.creatorId);
+      const members = db.collection("teamMembers")
         .findMany((m: any) => m.teamId === t.id)
         .map((m: any) => {
-          const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+          const u = db.collection("users").findUnique((usr: any) => usr.id === m.userId);
           return { id: m.id, ...m, user: u ? { name: u.name, avatar: u.avatar } : null };
         });
       return { ...t, creator, members, event, _count: { members: members.length } };
     });
 
-  const orphanListings = tinydb.collection("orphanListings")
+  const orphanListings = db.collection("orphanListings")
     .findMany((o: any) => o.targetEventId === params.id && o.status === "ACTIVE")
     .map((o: any) => {
-      const u = tinydb.collection("users").findUnique((usr: any) => usr.id === o.userId);
+      const u = db.collection("users").findUnique((usr: any) => usr.id === o.userId);
       return { ...o, targetEvent: event, user: u };
     });
 

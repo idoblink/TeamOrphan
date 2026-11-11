@@ -1,8 +1,7 @@
 import { notFound } from "next/navigation";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { calculateCompatibility } from "@/lib/matching";
-import { syncDatabaseFromCookies } from "@/lib/cookie-sync";
 import { TeamDetailClient } from "./TeamDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -14,30 +13,30 @@ export default async function TeamPage({
 }: {
   params: { id: string };
 }) {
-  await tinydb.sync(true);
+  await db.sync(true);
   const currentUser = await getCurrentUser();
 
-  let teamData = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+  let teamData = db.collection("teams").findUnique((t: any) => t.id === params.id);
   if (!teamData) {
-    await tinydb.sync(true);
-    teamData = tinydb.collection("teams").findUnique((t: any) => t.id === params.id);
+    await db.sync(true);
+    teamData = db.collection("teams").findUnique((t: any) => t.id === params.id);
   }
   if (!teamData) notFound();
 
-  const event = tinydb.collection("events").findUnique((e: any) => e.id === teamData.eventId);
-  const creator = tinydb.collection("users").findUnique((u: any) => u.id === teamData.creatorId);
+  const event = db.collection("events").findUnique((e: any) => e.id === teamData.eventId);
+  const creator = db.collection("users").findUnique((u: any) => u.id === teamData.creatorId);
 
-  const members = tinydb.collection("teamMembers")
+  const members = db.collection("teamMembers")
     .findMany((m: any) => m.teamId === params.id)
     .map((m: any) => {
-      const u = tinydb.collection("users").findUnique((usr: any) => usr.id === m.userId);
+      const u = db.collection("users").findUnique((usr: any) => usr.id === m.userId);
       return { id: m.id, ...m, user: u };
     });
 
-  const joinRequests = tinydb.collection("joinRequests")
+  const joinRequests = db.collection("joinRequests")
     .findMany((jr: any) => jr.teamId === params.id)
     .map((jr: any) => {
-      const u = tinydb.collection("users").findUnique((usr: any) => usr.id === jr.userId);
+      const u = db.collection("users").findUnique((usr: any) => usr.id === jr.userId);
       return { id: jr.id, ...jr, user: u };
     });
 

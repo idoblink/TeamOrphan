@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-import { tinydb } from "./tinydb";
+import { db } from "./redis";
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || "teamsync_super_secret_jwt_key_2026_neo_brutalism"
@@ -115,12 +115,12 @@ export async function getCurrentUser() {
     const payload = await verifySessionToken(token);
     if (!payload?.userId) return null;
 
-    await tinydb.sync();
-    let user = tinydb.collection("users").findUnique((u: any) => u.id === payload.userId);
+    await db.sync();
+    let user = db.collection("users").findUnique((u: any) => u.id === payload.userId);
 
-    // Re-hydrate registered user into TinyDB if new serverless instance
+    // Re-hydrate registered user into Redis if new serverless instance
     if (!user) {
-      user = tinydb.collection("users").insert({
+      user = db.collection("users").insert({
         id: payload.userId,
         name: payload.name || payload.username,
         email: payload.email,
@@ -135,7 +135,7 @@ export async function getCurrentUser() {
         passwordHash: "",
         isSuspended: false,
       });
-      await tinydb.persist();
+      await db.persist();
     }
 
     if (user.isSuspended) return null;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 
 export async function GET() {
@@ -9,10 +9,10 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const users = tinydb.collection("users").findMany().map((u: any) => {
-      const createdTeamsCount = tinydb.collection("teams").count((t: any) => t.creatorId === u.id);
-      const membershipsCount = tinydb.collection("teamMembers").count((m: any) => m.userId === u.id);
-      const reportsAgainstCount = tinydb.collection("reports").count((r: any) => r.reportedUserId === u.id);
+    const users = db.collection("users").findMany().map((u: any) => {
+      const createdTeamsCount = db.collection("teams").count((t: any) => t.creatorId === u.id);
+      const membershipsCount = db.collection("teamMembers").count((m: any) => m.userId === u.id);
+      const reportsAgainstCount = db.collection("reports").count((r: any) => r.reportedUserId === u.id);
 
       return {
         id: u.id,
@@ -50,7 +50,7 @@ export async function PATCH(req: NextRequest) {
     if (typeof isSuspended === "boolean") data.isSuspended = isSuspended;
     if (role && ["USER", "ADMIN"].includes(role)) data.role = role;
 
-    tinydb.collection("users").update(userId, data);
+    db.collection("users").update(userId, data);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Admin user update error:", error);

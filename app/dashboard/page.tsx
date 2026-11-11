@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { tinydb } from "@/lib/tinydb";
+import { db } from "@/lib/redis";
 import { getCurrentUser } from "@/lib/auth";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { BrutalButton } from "@/components/ui/BrutalButton";
@@ -11,7 +11,6 @@ import { SkillTag } from "@/components/ui/SkillTag";
 import { IncomingRequestsManager, IncomingRequestItem } from "@/components/dashboard/IncomingRequestsManager";
 import { calculateCompatibility } from "@/lib/matching";
 import { parseJsonArray } from "@/lib/utils";
-import { syncDatabaseFromCookies } from "@/lib/cookie-sync";
 import {
   Users,
   Compass,
@@ -25,7 +24,7 @@ export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
 export default async function DashboardPage() {
-  await tinydb.sync(true);
+  await db.sync(true);
   const user = await getCurrentUser();
   if (!user) {
     redirect("/login");
@@ -35,17 +34,17 @@ export default async function DashboardPage() {
   const userSkills = parseJsonArray(u.skills);
 
   // 1. My created teams
-  const myTeams = tinydb.collection("teams")
+  const myTeams = db.collection("teams")
     .findMany((t: any) => t.creatorId === u.id)
     .map((td: any) => {
-      const event = tinydb.collection("events").findUnique((e: any) => e.id === td.eventId);
-      const members = tinydb.collection("teamMembers")
+      const event = db.collection("events").findUnique((e: any) => e.id === td.eventId);
+      const members = db.collection("teamMembers")
         .findMany((m: any) => m.teamId === td.id)
         .map((m: any) => {
-          const usr = tinydb.collection("users").findUnique((us: any) => us.id === m.userId);
+          const usr = db.collection("users").findUnique((us: any) => us.id === m.userId);
           return { id: m.id, ...m, user: usr ? { id: usr.id, name: usr.name, avatar: usr.avatar } : null };
         });
-      const joinRequests = tinydb.collection("joinRequests")
+      const joinRequests = db.collection("joinRequests")
         .findMany((jr: any) => jr.teamId === td.id && jr.status === "PENDING");
       return { ...td, event, members, joinRequests, _count: { members: members.length, joinRequests: joinRequests.length } };
     });
@@ -54,7 +53,7 @@ export default async function DashboardPage() {
   const incomingRequests: IncomingRequestItem[] = [];
   myTeams.forEach((t: any) => {
     t.joinRequests?.forEach((jr: any) => {
-      const applicant = tinydb.collection("users").findUnique((usr: any) => usr.id === jr.userId);
+      const applicant = db.collection("users").findUnique((usr: any) => usr.id === jr.userId);
       incomingRequests.push({
         id: jr.id,
         teamId: t.id,
@@ -75,49 +74,49 @@ export default async function DashboardPage() {
   });
 
   // 2. Member teams
-  const memberTeams = tinydb.collection("teamMembers")
+  const memberTeams = db.collection("teamMembers")
     .findMany((m: any) => m.userId === u.id)
     .map((m: any) => {
-      const td = tinydb.collection("teams").findUnique((t: any) => t.id === m.teamId);
+      const td = db.collection("teams").findUnique((t: any) => t.id === m.teamId);
       if (!td || td.creatorId === u.id) return null;
-      const event = tinydb.collection("events").findUnique((e: any) => e.id === td.eventId);
-      const creator = tinydb.collection("users").findUnique((us: any) => us.id === td.creatorId);
-      const members = tinydb.collection("teamMembers").findMany((tm: any) => tm.teamId === td.id);
+      const event = db.collection("events").findUnique((e: any) => e.id === td.eventId);
+      const creator = db.collection("users").findUnique((us: any) => us.id === td.creatorId);
+      const members = db.collection("teamMembers").findMany((tm: any) => tm.teamId === td.id);
       return { ...td, event, creator, members, _count: { members: members.length } };
     })
     .filter(Boolean);
 
   // 3. My orphan listings
-  const myOrphanListings = tinydb.collection("orphanListings")
+  const myOrphanListings = db.collection("orphanListings")
     .findMany((o: any) => o.userId === u.id)
     .map((od: any) => {
-      const targetEvent = od.targetEventId ? tinydb.collection("events").findUnique((e: any) => e.id === od.targetEventId) : null;
+      const targetEvent = od.targetEventId ? db.collection("events").findUnique((e: any) => e.id === od.targetEventId) : null;
       return { ...od, targetEvent };
     });
 
   // 4. Sent requests
-  const mySentRequests = tinydb.collection("joinRequests")
+  const mySentRequests = db.collection("joinRequests")
     .findMany((jr: any) => jr.userId === u.id)
     .map((jrd: any) => {
-      const td = tinydb.collection("teams").findUnique((t: any) => t.id === jrd.teamId);
+      const td = db.collection("teams").findUnique((t: any) => t.id === jrd.teamId);
       if (!td) return null;
-      const event = tinydb.collection("events").findUnique((e: any) => e.id === td.eventId);
-      const creator = tinydb.collection("users").findUnique((us: any) => us.id === td.creatorId);
+      const event = db.collection("events").findUnique((e: any) => e.id === td.eventId);
+      const creator = db.collection("users").findUnique((us: any) => us.id === td.creatorId);
       return { ...jrd, team: { ...td, event, creator } };
     })
     .filter(Boolean);
 
   // 5. Recommended teams
-  const openTeams = tinydb.collection("teams")
+  const openTeams = db.collection("teams")
     .findMany((t: any) => t.status === "OPEN" && t.creatorId !== u.id)
     .filter((t: any) => {
-      const isMember = tinydb.collection("teamMembers").findFirst((m: any) => m.teamId === t.id && m.userId === u.id);
+      const isMember = db.collection("teamMembers").findFirst((m: any) => m.teamId === t.id && m.userId === u.id);
       return !isMember;
     })
     .map((t: any) => {
-      const event = tinydb.collection("events").findUnique((e: any) => e.id === t.eventId);
-      const creator = tinydb.collection("users").findUnique((us: any) => us.id === t.creatorId);
-      const members = tinydb.collection("teamMembers").findMany((m: any) => m.teamId === t.id);
+      const event = db.collection("events").findUnique((e: any) => e.id === t.eventId);
+      const creator = db.collection("users").findUnique((us: any) => us.id === t.creatorId);
+      const members = db.collection("teamMembers").findMany((m: any) => m.teamId === t.id);
       return { ...t, event, creator, members, _count: { members: members.length } };
     })
     .filter((t: any) => t.event !== null);
@@ -134,11 +133,11 @@ export default async function DashboardPage() {
     .slice(0, 3);
 
   // 6. Recommended orphans
-  const activeOrphans = tinydb.collection("orphanListings")
+  const activeOrphans = db.collection("orphanListings")
     .findMany((o: any) => o.status === "ACTIVE" && o.userId !== u.id)
     .map((od: any) => {
-      const orphanUser = tinydb.collection("users").findUnique((us: any) => us.id === od.userId);
-      const targetEvent = od.targetEventId ? tinydb.collection("events").findUnique((e: any) => e.id === od.targetEventId) : null;
+      const orphanUser = db.collection("users").findUnique((us: any) => us.id === od.userId);
+      const targetEvent = od.targetEventId ? db.collection("events").findUnique((e: any) => e.id === od.targetEventId) : null;
       return { ...od, user: orphanUser, targetEvent };
     });
 
